@@ -177,12 +177,13 @@ export function activate(context: ExtensionContext) {
 		if (!folder)
 			return
 		folder = getOuterMostWorkspaceFolder(folder)
-
+		
 		const folderUri = !unityServer ? folder.uri.toString() : "server"
 		if (!clients.has(folderUri)) {
 			const serverOptions = async () => {
 				const port = DEFAULT_PORT + clients.size
-				const [_, socket] = await createServerWithSocket(folderUri, port, cmd, setArg(args, "${port}", port.toPrecision()), cwd, outputChannel)
+				const serverArgs = setArg(args, "${workspaceFolder}", folder.uri.fsPath)
+				const [_, socket] = await createServerWithSocket(folderUri, port, cmd, setArg(serverArgs, "${port}", port.toPrecision()), cwd, outputChannel)
 				const result: StreamInfo = {
 					writer: socket,
 					reader: socket
