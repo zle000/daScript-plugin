@@ -1,4 +1,3 @@
-import * as net from 'net'
 import * as path from 'path'
 import * as cp from 'child_process'
 import {
@@ -9,27 +8,26 @@ import { runInTerminal } from 'run-in-terminal'
 import * as vscode from 'vscode'
 
 import {
-	LanguageClient, LanguageClientOptions, StreamInfo
+	LanguageClient, LanguageClientOptions, TransportKind
 } from 'vscode-languageclient/node'
 
-let SPAWN_SERVER = true
 let defaultClient: LanguageClient
 const clients: Map<string, LanguageClient> = new Map()
-const sockets: Map<string, net.Socket> = new Map()
-const childProcesses: Map<string, cp.ChildProcess> = new Map()
 
 let _sortedWorkspaceFolders: string[] | undefined
 function sortedWorkspaceFolders(): string[] {
 	if (_sortedWorkspaceFolders === void 0) {
-		_sortedWorkspaceFolders = Workspace.workspaceFolders
-			? Workspace.workspaceFolders.map(folder => {
-				let result = folder.uri.toString()
-				if (result.charAt(result.length - 1) !== '/') {
-					result = result + '/'
-				}
-				return result
-			}).sort((a, b) => { return a.length - b.length })
-			: []
+		_sortedWorkspaceFolders = Workspace.workspaceFolders ? Workspace.workspaceFolders.map(folder => {
+			let result = folder.uri.toString()
+			if (result.charAt(result.length - 1) !== '/') {
+				result = result + '/'
+			}
+			return result
+		}).sort(
+			(a, b) => {
+				return a.length - b.length
+			}
+		) : []
 	}
 	return _sortedWorkspaceFolders
 }
@@ -39,110 +37,20 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 	const sorted = sortedWorkspaceFolders()
 	for (const element of sorted) {
 		let uri = folder.uri.toString()
-		if (uri.charAt(uri.length - 1) !== '/')
+		if (uri.charAt(uri.length - 1) !== '/') {
 			uri = uri + '/'
-		if (uri.startsWith(element))
+		}
+		if (uri.startsWith(element)) {
 			return Workspace.getWorkspaceFolder(Uri.parse(element))!
+		}
 	}
 	return folder
 }
 
-function createServerWithSocket(folder_uri: string, port: number, cmd: string, args: string[], cwd: string, out: OutputChannel) {
-	return new Promise<[cp.ChildProcess, net.Socket]>(resolve => {
-		const log = function (data: string) {
-			console.log(data)
-			out.appendLine(data)
-		}
-		log(`language server (ls): starting server... Workspace folder: '${folder_uri}'\nls: ${cwd}> ${cmd} ${args.join(' ')}`)
-		const child: cp.ChildProcess = SPAWN_SERVER ? cp.spawn(cmd, args, { cwd: cwd }) : null
-
-		if (child) {
-			const settings = Workspace.getConfiguration()
-			const timeout = settings.get<number>("dascript.server.connectTimeout", 2)
-			const waitTime = Date.now()
-			while (Date.now() - waitTime < timeout * 1000) {
-				// log("waiting child... " + timeout)
-			}
-
-			child.stdout.on('data', (data) => log(data?.toString()))
-			child.stdout.on("error", (data) => log(`Error: ${data}`))
-			child.stderr.on("data", (data) => log(`stderr: ${data?.toString()}`))
-			child.stderr.on("error", (data) => log(`stderr: Error: ${data}`))
-
-			child.on('close', (code) => {
-				log(`\nls: child process closed with code ${code} - '${folder_uri}'. Workspace folder: '${folder_uri}'`)
-				childProcesses.delete(folder_uri)
-				if (sockets.has(folder_uri))
-					sockets.delete(folder_uri)
-				else
-					resolve([child, socket])
-			})
-			child.on('error', (err) => {
-				log(`\nls: Error: unable to spawn server '${err.message}'. Workspace folder: '${folder_uri}'`)
-			})
-			child.on('exit', (code) => {
-				log(`\nls: child process exited with code ${code} - '${folder_uri}'. Workspace folder: '${folder_uri}'`)
-				childProcesses.delete(folder_uri)
-				if (sockets.has(folder_uri))
-					sockets.delete(folder_uri)
-				else
-					resolve([child, socket])
-			})
-		}
-
-		const socket = net.connect({ port: port }, () => {
-			socket.setNoDelay()
-			log(`> ${port} connected - '${folder_uri}'`)
-			childProcesses.set(folder_uri, child)
-			sockets.set(folder_uri, socket)
-			resolve([child, socket])
-		})
-
-		// socket.on('data', (data) => {
-		// 	const msg = data.toString()
-		// 	console.log(msg.length > 1000 ? msg.substr(0, 1000) + "..." : msg)
-		// })
-		socket.on('error', (err) => {
-			console.log(`ls: socket error: ${err.message}. Workspace folder: '${folder_uri}'`)
-			if (err.stack != null)
-				console.log(err.stack ?? "")
-		})
-		socket.on('end', () => {
-			console.log(`ls: socked closed. Workspace folder: '${folder_uri}'`)
-			if (child && !child.killed)
-				child.kill()
-			childProcesses.delete(folder_uri)
-			sockets.delete(folder_uri)
-		})
-	})
-}
-
-function setArg(args: string[], pattern: string, value: string): string[] {
-	const res = new Array<string>()
-	for (const it of args) {
-		res.push(it.replace(pattern, value))
-	}
-	return res
-}
-
 export function activate(context: ExtensionContext) {
 
-	let DEFAULT_PORT = 7999 + Math.round(Math.random() * 1000)
-
-	const settings = Workspace.getConfiguration()
-
-	const cmd = settings.get<string>("dascript.compiler")
-	let args = settings.get<string[]>("dascript.server.args")
-	let unityServer = settings.get<boolean>("dascript.server.unity", false)
-	const port: number = settings.get("dascript.debug.port", -1)
-	if (port != 0) {
-		SPAWN_SERVER = port > 0
-		DEFAULT_PORT = Math.abs(port)
-	}
-	const cwd = context.asAbsolutePath(path.join('server', 'das'))
-	const serverFilePath = context.asAbsolutePath(path.join('server', 'das', 'server.das'))
-	args = setArg(args, "${file}", serverFilePath)
-	const outputChannel: OutputChannel = Window.createOutputChannel('daScript')
+	const module = context.asAbsolutePath(path.join('server', 'out', 'server.js'))
+	const outputChannel: OutputChannel = Window.createOutputChannel('daScript2')
 
 	function didOpenTextDocument(document: TextDocument): void {
 		if (document.languageId !== 'dascript' || (document.uri.scheme !== 'file' && document.uri.scheme !== 'untitled')) {
@@ -150,72 +58,48 @@ export function activate(context: ExtensionContext) {
 		}
 
 		const uri = document.uri
+		// Untitled files go to a default client.
 		if (uri.scheme === 'untitled' && !defaultClient) {
-			const serverOptions = async () => {
-				const port = DEFAULT_PORT - 1
-				const [_, socket] = await createServerWithSocket("____untitled____", port, cmd, setArg(args, "${port}", port.toPrecision()), cwd, outputChannel)
-				const result: StreamInfo = {
-					writer: socket,
-					reader: socket
-				}
-				return Promise.resolve(result)
+			const serverOptions = {
+				run: { module, transport: TransportKind.ipc },
+				debug: { module, transport: TransportKind.ipc }
 			}
 			const clientOptions: LanguageClientOptions = {
-				documentSelector: [{ scheme: 'untitled', language: 'dascript' }],
-				diagnosticCollectionName: 'dascript',
-				outputChannel: outputChannel,
-				connectionOptions: {
-					cancellationStrategy: null,
-					maxRestartCount: 10
-				}
+				documentSelector: [
+					{ scheme: 'untitled', language: 'dascript' }
+				],
+				diagnosticCollectionName: 'daScript',
+				outputChannel: outputChannel
 			}
 			defaultClient = new LanguageClient('dascript', serverOptions, clientOptions)
 			defaultClient.start()
 			return
 		}
 		let folder = Workspace.getWorkspaceFolder(uri)
-		if (!folder)
+		// Files outside a folder can't be handled. This might depend on the language.
+		// Single file languages like JSON might handle files outside the workspace folders.
+		if (!folder) {
 			return
+		}
+		// If we have nested workspace folders we only start a server on the outer most workspace folder.
 		folder = getOuterMostWorkspaceFolder(folder)
 
-		const folderUri = !unityServer ? folder.uri.toString() : "server"
-		if (!clients.has(folderUri)) {
-			const serverOptions = async () => {
-				const port = DEFAULT_PORT + clients.size
-				const [_, socket] = await createServerWithSocket(folderUri, port, cmd, setArg(args, "${port}", port.toPrecision()), cwd, outputChannel)
-				const result: StreamInfo = {
-					writer: socket,
-					reader: socket
-				}
-				return Promise.resolve(result)
+		if (!clients.has(folder.uri.toString())) {
+			const serverOptions = {
+				run: { module, transport: TransportKind.ipc },
+				debug: { module, transport: TransportKind.ipc }
 			}
 			const clientOptions: LanguageClientOptions = {
 				documentSelector: [
-					{ scheme: 'file', language: 'dascript', pattern: !unityServer ? `${folder.uri.fsPath}/**/*` : undefined }
+					{ scheme: 'file', language: 'dascript', pattern: `${folder.uri.fsPath}/**/*` }
 				],
 				diagnosticCollectionName: 'dascript',
 				workspaceFolder: folder,
-				outputChannel: outputChannel,
-				connectionOptions: {
-					cancellationStrategy: null,
-					maxRestartCount: 10
-				}
-				// errorHandler: {
-				// 	error: (error, message, count) => {
-				// 		outputChannel.appendLine(`[Client error] #(${count})`)
-				// 		outputChannel.appendLine(error.message)
-				// 		outputChannel.appendLine(message.jsonrpc)
-				// 		return ErrorAction.Continue
-				// 	},
-				// 	closed: () => {
-				// 		outputChannel.appendLine(`[Client closed] Restart`)
-				// 		return CloseAction.Restart
-				// 	}
-				// }
+				outputChannel: outputChannel
 			}
 			const client = new LanguageClient('dascript', serverOptions, clientOptions)
 			client.start()
-			clients.set(folderUri, client)
+			clients.set(folder.uri.toString(), client)
 		}
 	}
 
@@ -223,16 +107,10 @@ export function activate(context: ExtensionContext) {
 	Workspace.textDocuments.forEach(didOpenTextDocument)
 	Workspace.onDidChangeWorkspaceFolders((event) => {
 		for (const folder of event.removed) {
-			const uri = folder.uri.toString()
-			const client = clients.get(uri)
+			const client = clients.get(folder.uri.toString())
 			if (client) {
-				clients.delete(uri)
+				clients.delete(folder.uri.toString())
 				client.stop()
-			}
-			const child = childProcesses.get(uri)
-			if (child) {
-				childProcesses.delete(uri)
-				child.kill()
 			}
 		}
 	})
@@ -246,10 +124,12 @@ export function activate(context: ExtensionContext) {
 
 export function deactivate(): Thenable<void> {
 	const promises: Thenable<void>[] = []
-	if (defaultClient)
+	if (defaultClient) {
 		promises.push(defaultClient.stop())
-	for (const client of clients.values())
+	}
+	for (const client of clients.values()) {
 		promises.push(client.stop())
+	}
 	return Promise.all(promises).then(() => undefined)
 }
 

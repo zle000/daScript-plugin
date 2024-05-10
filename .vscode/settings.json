@@ -1,2 +1,17 @@
 {
+    "typescript.preferences.quoteStyle": "single",
+    "cSpell.words": [
+        "dascript",
+        "daslib",
+        "debugapi",
+        "rtti",
+        "struct",
+        "uriparser"
+    ],
+    "typescript.inlayHints.variableTypes.enabled": true,
+    "typescript.inlayHints.propertyDeclarationTypes.enabled": true,
+    "typescript.inlayHints.parameterTypes.enabled": true,
+    "typescript.inlayHints.functionLikeReturnTypes.enabled": true,
+    "typescript.inlayHints.enumMemberValues.enabled": true,
+    "typescript.inlayHints.parameterNames.enabled": "all"
 }

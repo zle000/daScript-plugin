@@ -66,6 +66,6 @@ def getTokens(from : string) : Tokens
             if it |> strip() |> length() == 0 || find(it, "\"") == -1
                 break
             let b = find(it, "\"") + 1
-            list |> emplace(slice(it, b, find(it, "\"", b)))
+            list |> push(slice(it, b, find(it, "\"", b)))
         res <- [[Tokens tokens <- list]]
     return <- res

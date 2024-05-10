@@ -1,0 +1,491 @@
+options indenting = 4
+options no_global_variables
+options no_unused_function_arguments
+options no_unused_block_arguments
+options strict_smart_pointers
+options no_aot
+
+require ast
+require rtti
+require strings
+require fio
+require uriparser
+require daslib/ast_boost
+require daslib/strings_boost
+require daslib/json_boost
+require completion_boost
+
+def arg_value(args : array<string>; name : string; default_value : string) : string
+    let idx = args |> find_index(name)
+    return idx >= 0 && idx + 1 < length(args) ? args[idx + 1] : default_value
+
+def arg_value(args : array<string>; name : string; default_value : int) : int
+    let idx = args |> find_index(name)
+    return idx >= 0 && idx + 1 < length(args) ? to_int(args[idx + 1]) : default_value
+
+struct ValidateConfig
+    compiler : string
+    file : string
+    originalFile : string
+    projectFile : string
+    args : string
+    ignoreSharedModules : bool
+    noGlobalVariables : bool
+    noUnusedBlockArguments : bool
+    noUnusedFunctionArguments : bool
+    failOnLackOfAotExport : bool
+
+    fileAccessRoots : table<string; string>
+
+let WRITE_RESULT_TO_FILE = true
+
+[export]
+def main()
+    var args <- get_command_line_arguments()
+    var config : ValidateConfig
+
+    for arg, idx in args, count()
+        if arg == "--file-access-root"
+            if idx + 1 < length(args)
+                var inscope parts <- args[idx + 1] |> split(":")
+                if length(parts) == 2
+                    config.fileAccessRoots[parts[0]] = parts[1]
+
+    config.compiler = args[0]
+    config.file = args |> arg_value("--file", "")
+    config.originalFile = args |> arg_value("--original-file", config.file)
+    config.projectFile = args |> arg_value("--project-file", "")
+    config.args = args |> arg_value("--args", "")
+
+    config.ignoreSharedModules = args |> has_value("--ignore-shared-modules")
+    config.noGlobalVariables = args |> has_value("--no-global-variables")
+    config.noUnusedBlockArguments = args |> has_value("--no-unused-block-arguments")
+    config.noUnusedFunctionArguments = args |> has_value("--no-unused-function-arguments")
+    config.failOnLackOfAotExport = args |> has_value("--fail-on-lack-of-aot-export")
+
+    var res <- ValidationResult()
+    res |> compile(config)
+
+    let textRes = res |> to_json()
+
+    if WRITE_RESULT_TO_FILE
+        mkdir("results")
+        let fileName = file_name_to_uri(config.originalFile) |> split("/") |> back()
+        fopen("results/{fileName}.json", "w") <| $(f)
+            f |> fwrite(textRes)
+
+    textRes |> print()
+
+
+struct DasError : CompletionAt
+    // _range : Range
+    what : string
+    extra : string
+    fixme : string
+    cerr : int
+    level : int // 0 error, 1 warning
+
+
+struct ValidationResult
+    tokens : array<DasToken>
+    errors : array<DasError>
+    completion : CompletionResult
+
+def init_file_access(var access; fileAccessorRoots : table<string; string>)
+    for rootName, rootPath in keys(fileAccessorRoots), values(fileAccessorRoots)
+        access |> add_file_access_root(rootName, rootPath)
+
+struct ErrorData
+    message : string
+
+def compile(var res : ValidationResult; config : ValidateConfig)
+
+    fopen(config.file, "rb") <| $(fr)
+        if fr == null
+            res.errors |> emplace([[DasError() what = "unable to open file '{config.file}'" ]])
+            return
+        fmap(fr) <| $(fileCont)
+
+            var inscope access <- make_file_access(config.projectFile)
+            access |> set_file_source(config.originalFile, string(fileCont))
+            access |> init_file_access(config.fileAccessRoots)
+
+            using() <| $(var mg : ModuleGroup)
+                var cp = CodeOfPolicies()
+                cp.ignore_shared_modules = config.ignoreSharedModules
+                cp.no_global_variables = config.noGlobalVariables
+                cp.no_unused_block_arguments = config.noUnusedBlockArguments
+                cp.no_unused_function_arguments = config.noUnusedFunctionArguments
+                cp.fail_on_lack_of_aot_export = config.failOnLackOfAotExport
+                cp.export_all = true
+                cp.aot_module = true
+                cp.completion = true
+                cp.no_optimizations = true
+                try
+                    compile_file(config.originalFile, access, unsafe(addr(mg)), cp) <| $(ok, program, error)
+
+
+                        if ok && program != null
+                            pass
+                            var inscope completion <- CompletionContext()
+                            program |> get_ptr() |> for_each_module() <| $(mod)
+                                // print("{mod}")
+                                completion |> parse_module(mod)
+
+                            var visitor <- new AstData()
+                            visitor.res = unsafe(addr(res))
+                            visitor.completion = unsafe(addr(completion))
+                            var inscope adapter <- make_visitor(*visitor)
+                            program |> visit(adapter)
+                            unsafe
+                                delete visitor
+
+                            res.completion <- completion.result
+
+                        if program == null
+                            res.errors |> emplace([[DasError() what = "{error}", file=config.file ]])
+                            return
+
+                        for err in program.errors
+                            res.errors |> emplace([[DasError()
+                                what = "{err.what}",
+                                extra = "{err.extra}",
+                                fixme = "{err.fixme}",
+                                file=err.at.fileInfo != null ? "{err.at.fileInfo.name}" : "",
+                                line = err.at.line |> int(),
+                                column = err.at.column |> int(),
+                                lineEnd = err.at.last_line |> int(),
+                                columnEnd = err.at.last_column |> int(),
+                                cerr = int(err.cerr),
+                            ]])
+                recover
+                    let msg = empty(this_context().exception) ? "failed to compile" : "failed to compile: {this_context().exception}"
+                    res.errors |> emplace([[DasError() what = msg, file=config.file ]])
+
+
+struct DasToken : CompletionAt
+    declAt : CompletionAt = [[CompletionAt() line = -1, column = -1]]
+    kind : string
+    mod : string
+    name : string
+    value : string
+    alias : string
+    tdk : string
+    parentTdk : string
+    isUnused : bool
+    isConst : bool
+
+def DasToken(expr; var completion : CompletionContext?) : DasToken
+    var token = DasToken()
+    token.kind = "{expr.__rtti}"
+    if expr._type != null
+        token.tdk = TypeDeclKey(expr._type)
+        token.isConst = expr._type.flags.constant
+        *completion |> parse_typedecl(token.tdk, expr._type)
+    token |> fill_at(expr.at)
+    return token
+
+class AstData : AstVisitor
+    [[do_not_delete]] res : ValidationResult?
+    [[do_not_delete]] completion : CompletionContext?
+    skipExprs : bool = false
+    // def override preVisitFunction(fun:FunctionPtr) : void
+    //     debug(fun)
+    // def override preVisitExprTypeDecl(expr:smart_ptr<ExprTypeDecl>) : void
+    //     if expr == null
+    //         return
+    //     let tdk = TypeDeclKey(expr._type)
+    //     let foundNew = *completion |> parse_typedecl(tdk, expr._type)
+    //     print("{tdk} new? {foundNew}\n")
+
+    // TODO: enum
+    // TODO: variant
+    // TODO: tuple
+    // TODO: typedef
+
+    def override preVisitStructure(str : StructurePtr) : void
+        if str == null
+            return
+        var token <- DasToken()
+        token.kind = "struct"
+        token.name = "{str.name}"
+        token.mod = str._module != null ? "{str._module.name}" : ""
+        token |> fill_at(str.at)
+        res.tokens |> emplace(token)
+
+        for fld in str.fields
+            var token2 <- DasToken()
+            token2.kind = "field"
+            token2.name = "{fld.name}"
+            token2.tdk = TypeDeclKey(fld._type)
+            token2.isConst = fld._type.flags.constant
+            *completion |> parse_typedecl(token2.tdk, fld._type)
+            token2.mod = token.mod
+            token2 |> fill_at(fld.at)
+            res.tokens |> emplace(token2)
+
+
+    [unused_argument(index, last)] def override preVisitExprMakeStructField(expr : smart_ptr<ExprMakeStruct>; index : int; decl : MakeFieldDeclPtr; last : bool) : void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        var token <- DasToken()
+        token.kind = "field"
+        token.name = "{decl.name}"
+        token.value = decl.value |> describe()
+        token.tdk = TypeDeclKey(decl.value._type)
+        token.parentTdk = TypeDeclKey(expr._type)
+        // token.isConst = decl.flags.
+        *completion |> parse_typedecl(token.tdk, decl.value._type)
+        token |> fill_at(decl.at)
+        // token.declAt |> fill_at(expr._type.at)
+        res.tokens |> emplace(token)
+
+
+    def preVisitTypeDecl_(typ : TypeDeclPtr) : int
+        if typ == null
+            return -1
+        let tdk = TypeDeclKey(typ)
+        *completion |> parse_typedecl(tdk, typ)
+        var token <- DasToken()
+        token.kind = "typedecl"
+        // token.name = tdk
+        token.tdk = tdk
+        token.isConst = typ.flags.constant
+        token |> fill_at(typ.at)
+        res.tokens |> emplace(token)
+        return length(res.tokens) - 1
+
+    def override preVisitTypeDecl(typ : TypeDeclPtr) : void
+        preVisitTypeDecl_(typ)
+
+    [unused_argument(name)] def override preVisitAlias(typ : TypeDeclPtr; name : das_string) : void
+        let idx = preVisitTypeDecl_(typ)
+        if idx >= 0
+            // res.tokens[idx].name = "{name}"
+            res.tokens[idx].alias = "{name}"
+
+    def override preVisitExpression(expr : ExpressionPtr) : void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        if expr is ExprBlock || expr is ExprMakeBlock // ignore blocks, huge amount of text, no value
+            return
+        if expr is ExprFor || expr is ExprIfThenElse // ignore too
+            return
+        if expr is ExprFakeLineInfo || expr is ExprFakeContext // generated exprs
+            return
+        if expr is ExprCall || expr is ExprLet || expr is ExprVar || expr is ExprOp1 // will be parsed separately
+            return
+        if expr is ExprRef2Value // ignore, we need sub exprs
+            return
+        var token <- DasToken(expr, completion)
+        if expr is ExprField
+            let field = expr as ExprField
+            token.name = "{field.name}"
+            // token.tdk = field._type != null ? "{TypeDeclKey(field._type)}" : ""
+            if field.field != null
+                token.declAt |> fill_at(field.field.at)
+        elif expr is ExprAddr
+            token.name = "{(expr as ExprAddr).target}"
+        else
+            token.name = expr |> describe()
+        res.tokens |> emplace(token)
+
+    // def preVisitExprLooksLikeCall_(expr:ExprLooksLikeCall?): void
+    //     if skipExprs || expr == null || expr.genFlags.generated
+    //         return
+    //     var token <- DasToken(expr, completion)
+    //     token.name = "{expr.name}"
+    //     token.value = "def {expr.name}"
+    //     res.tokens |> emplace(token)
+
+    // def override preVisitExprLooksLikeCall(expr : smart_ptr<ExprLooksLikeCall>) : void
+    //     if skipExprs || expr == null || expr.genFlags.generated
+    //         return
+    //     preVisitExprLooksLikeCall_(expr |> get_ptr())
+
+    def preVisitExprCallFunc(expr:ExprCallFunc?): void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        var token <- DasToken(expr, completion)
+        token.name = "{expr.name}"
+        token.value = "def {expr.name}"
+        if expr.func != null
+            token.mod = expr.func._module != null ? "{expr.func._module.name}" : ""
+            token.declAt |> fill_at(expr.func.at)
+            var first = true
+            for a in expr.func.arguments
+                token.value += first ? "(" : ", "
+                first = false
+                token.value += "{a.name}"
+                if a._type != null
+                    let atdk = TypeDeclKey(a._type)
+                    token.value += ": {atdk}"
+                    *completion |> parse_typedecl(atdk, a._type)
+            token.value += ")"
+            if expr.func.result != null
+                let restdk = TypeDeclKey(expr.func.result)
+                token.value += ": {restdk}"
+                *completion |> parse_typedecl(restdk, expr.func.result)
+        res.tokens |> emplace(token)
+
+    def override preVisitExprCall(expr:smart_ptr<ExprCall>): void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        preVisitExprCallFunc(expr |> get_ptr())
+
+    def override preVisitExprLet(expr:smart_ptr<ExprLet>) : void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        for v in expr.variables
+            var token <- DasToken(expr, completion)
+            token.name = "{v.name}"
+            if v._type != null
+                token.tdk = TypeDeclKey(v._type)
+                token.isConst = v._type.flags.constant
+            *completion |> parse_typedecl(token.tdk, v._type)
+            token |> fill_at(v.at)
+            if v.init != null
+                token.value = v.init |> describe()
+            token.mod = v._module != null ? "{v._module.name}" : ""
+            token.isUnused = !v.flags.marked_used && v.isAccessUnused
+            res.tokens |> emplace(token)
+
+    [unused_argument(last)] def override preVisitExprForVariable(expr : smart_ptr<ExprFor>; svar : VariablePtr; last : bool) : void
+        if skipExprs || expr == null || expr.genFlags.generated || svar.flags.generated
+            return
+        var token <- DasToken(expr, completion)
+        token.name = "{svar.name}"
+        if svar._type != null
+            token.tdk = TypeDeclKey(svar._type)
+            token.isConst = svar._type.flags.constant
+        *completion |> parse_typedecl(token.tdk, svar._type)
+        token |> fill_at(svar.at)
+        if svar.init != null
+            token.value = svar.init |> describe()
+        token.mod = svar._module != null ? "{svar._module.name}" : ""
+        token.isUnused = !svar.flags.marked_used && svar.isAccessUnused
+        res.tokens |> emplace(token)
+
+
+    def override preVisitExprVar(expr:smart_ptr<ExprVar>) : void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        var token <- DasToken(expr, completion)
+        token.name = "{expr.name}"
+        if expr.variable != null
+            token.name = "{expr.variable.name}"
+            token.declAt |> fill_at(expr.variable.at)
+            if expr.variable.init != null
+                token.value = expr.variable.init |> describe()
+        // if expr._type != null
+        //     token.isConst = expr._type.flags.constant
+        //     token.tdk = TypeDeclKey(expr._type)
+        //     *completion |> parse_typedecl(token.tdk, expr._type)
+        res.tokens |> emplace(token)
+
+    def override preVisitFunction(fun : FunctionPtr) : void
+        if fun.flags.generated && !fun.flags._generator && !fun.flags._lambda
+            skipExprs = true
+            return
+        if fun.flags._lambda
+            return
+
+        var token <- DasToken()
+        token.kind = "func"
+        token |> fill_at(fun.at)
+        token.name = "{fun.name}"
+        if fun.result != null
+            let tdk = TypeDeclKey(fun.result)
+            token.tdk = tdk
+            token.isConst = fun.result.flags.constant
+            *completion |> parse_typedecl(tdk, fun.result)
+        token.mod = fun._module != null ? "{fun._module.name}" : ""
+        token.declAt |> fill_at(fun.atDecl)
+        token.value = "def {fun.name}("
+        var first = true
+        for a in fun.arguments
+            token.value += first ? "" : ", "
+            first = false
+            token.value += "{a.name}"
+            if a._type != null
+                let atdk = TypeDeclKey(a._type)
+                token.value += ": {atdk}"
+                *completion |> parse_typedecl(atdk, a._type)
+        token.value += ")"
+        if fun.result != null
+            let restdk = TypeDeclKey(fun.result)
+            token.value += ": {restdk}"
+            *completion |> parse_typedecl(restdk, fun.result)
+        res.tokens |> emplace(token)
+
+        for arg in fun.arguments
+            if arg.flags.generated
+                continue
+            // preVisitExprVar(arg)
+            var token2 <- DasToken()
+            token2 |> fill_at(arg.at)
+            token2.kind = "fn_arg_token"
+            token2.name = "{arg.name}"
+            if arg.init != null
+                token2.value = "{arg.init |> describe()}"
+            token2.tdk = TypeDeclKey(arg._type)
+            token2.isConst = arg._type.flags.constant
+            *completion |> parse_typedecl(token2.tdk, arg._type)
+            token2.mod = token.mod
+            res.tokens |> emplace(token2)
+
+    def override visitFunction(var fun : FunctionPtr) : FunctionPtr
+        skipExprs = false
+        return <- fun
+
+    def override preVisitExprOp1(expr : smart_ptr<ExprOp1>) : void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        preVisitExprCallFunc(expr |> get_ptr())
+
+    def override preVisitExprOp2(expr : smart_ptr<ExprOp2>) : void
+        if skipExprs || expr == null || expr.genFlags.generated
+            return
+        preVisitExprCallFunc(expr |> get_ptr())
+
+    // def override preVisitExprTypeInfo(expr : smart_ptr<ExprTypeInfo>) : void
+    //     if skipExprs || expr == null || expr.genFlags.generated
+    //         return
+    //     if skipExprs || expr == null || expr.genFlags.generated
+    //         return
+    //     var name = "typeinfo"
+    //     var desc = "{name}("
+    //     if !empty(expr.trait)
+    //         desc += "{expr.trait}"
+    //     if !empty(expr.subtrait)
+    //         desc += "<{expr.subtrait}"
+    //         if !empty(expr.extratrait)
+    //             desc += "; {expr.extratrait}"
+    //         desc += "> "
+    //     else
+    //         desc += " "
+    //     var typ = expr._type != null ? describe(expr._type) : ""
+    //     if expr.subexpr != null && expr.subexpr._type != null
+    //         desc += "arg1 : {describe(expr.subexpr._type)}"
+    //     elif expr.typeexpr != null
+    //         desc += "type<{describe(expr.typeexpr)}>"
+    //     desc += ")"
+    //     if typ != ""
+    //         desc += " : {typ}"
+    //     var token <- DasToken()
+    //     token.kind = "typeinfo"
+    //     token.name = name
+    //     token.value = desc
+    //     token.tdk = TypeDeclKey(expr._type)
+    //     token.isConst = expr._type.flags.constant
+    //     *completion |> parse_typedecl(token.tdk, expr._type)
+    //     token |> fill_at(expr.at)
+    //     res.tokens |> emplace(token)
+
+
+    // def override preVisitTypeDecl(typ:TypeDeclPtr) : void
+    //     debug(typ)
+    // TODO:
+    // - variables
+    // - functions
+    // - operators (Op1, Op2)
