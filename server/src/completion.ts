@@ -90,6 +90,7 @@ export interface CompletionEnum extends CompletionAt {
     name: string
     mod: string
     cpp: string
+    tdk: string
     baseType: string
     values: CompletionEnumValue[]
 }

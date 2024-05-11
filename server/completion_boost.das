@@ -111,6 +111,7 @@ struct CompletionEnum : CompletionAt
     name : string
     mod : string
     cpp : string
+    tdk : string
     baseType : string
     values : array<CompletionEnumValue>
 
@@ -119,6 +120,9 @@ def parse_enum(var res : CompletionContext; e : smart_ptr<Enumeration>&)
     en |> fill_at(e.at)
     if e._module != null
         en.mod = e._module.name |> string()
+        en.tdk = "{en.mod}::{en.name}"
+    else
+        en.tdk = "{en.name}"
     for ef in e.list
         var ev <- [[CompletionEnumValue() name="{ef.name}"]]
         ev |> fill_at(ef.at)

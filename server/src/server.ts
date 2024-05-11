@@ -1,10 +1,10 @@
 
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Hover, MarkupContent, Location, DiagnosticSeverity, SymbolKind, SymbolInformation
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Hover, MarkupContent, Location, DiagnosticSeverity, SymbolKind, SymbolInformation,
+	Position
 } from 'vscode-languageserver/node'
 
 import {
-	Position,
 	TextDocument
 } from 'vscode-languageserver-textdocument'
 
@@ -14,7 +14,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, posInRange, primitiveBaseType, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './Completion'
+import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, posInRange, primitiveBaseType, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -210,50 +210,41 @@ connection.onCompletion(async (textDocumentPosition) => {
 	if (doc) {
 		const completionToken = prevToken(doc, textDocumentPosition.position)
 		// console.log('text', JSON.stringify(token))
+		let completionTdk: string
 		if (completionToken.obj.length > 0) {
-			{
-				const tokens = getDocumentTokensAt(fileData, completionToken.objRange.start)
-				let tok = tokens.find(t => t.name === completionToken.obj)
-				if (!tok) {
-					// fallback logic, look up for similar tokens
-					let cursorPos: integer = 0
-					for (let index = 0; index < fileData.tokens.length; index++) {
-						const t = fileData.tokens[index]
-						if (isPositionLess(t._range.end, completionToken.objRange.start)) {
-							cursorPos = index
-							continue
-						}
-					}
-					for (let index = cursorPos; index >= 0; index--) {
-						const t = fileData.tokens[index]
-						if (t.kind == 'func' || t.kind == 'struct' || t.kind == 'enum') // top level tokens
-							break
-						if (t.name === completionToken.obj) {
-							tok = t // probably found
-							break
-						}
+			const tok = getDocumentTokensAt(fileData, completionToken.obj, completionToken.objRange.start, /*exact match*/true)
+			if (tok && tok.tdk.length > 0) {
+				completionTdk = tok.tdk
+				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
+				if (typeDeclData != null) {
+					typeDeclCompletion(typeDeclData, fileData.completion, res)
+				}
+			}
+			else if (completionToken.obj.length > 0) {
+				// probably enum
+				const enumData = fileData.completion.enums.find(e => e.name === completionToken.obj)
+				if (enumData != null) {
+					completionTdk = enumData.tdk
+					for (const ev of enumData.values) {
+						const c = CompletionItem.create(ev.name)
+						c.detail = enumValueDetail(ev)
+						c.documentation = enumValueDocs(ev, enumData)
+						c.kind = CompletionItemKind.EnumMember
+						res.push(c)
 					}
 				}
-				if (tok && tok.tdk.length > 0) {
-					for (const td of fileData.completion.typeDecls) {
-						if (td.tdk === tok.tdk) {
-							typeDeclCompletion(td, fileData.completion, res)
-							break
-							// res.push(CompletionItem.create(td.tdk))
-							// if (!primitiveBaseType(td, fileData.completion)) {
-
-							// }
-						}
-					}
-					for (const fn of fileData.completion.functions) {
-						if (fn.args.length > 0 && fn.args[0].tdk === tok.tdk) {
-							const c = CompletionItem.create(fn.name)
-							c.detail = funcDetail(fn)
-							c.documentation = funcDocs(fn)
-							c.kind = CompletionItemKind.Function
-							res.push(c)
-						}
-					}
+			}
+		}
+		if (completionTdk != "") {
+			// fill extension functions
+			for (const fn of fileData.completion.functions) {
+				// TODO: ignore const cases: Foo const == Foo
+				if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {
+					const c = CompletionItem.create(fn.name)
+					c.detail = funcDetail(fn)
+					c.documentation = funcDocs(fn)
+					c.kind = CompletionItemKind.Function
+					res.push(c)
 				}
 			}
 		}
@@ -262,7 +253,31 @@ connection.onCompletion(async (textDocumentPosition) => {
 	// return fileData?.completionItems ?? []
 })
 
-function getDocumentTokensAt(fileData: FixedValidationResult, position: Position): DasToken[] {
+function getDocumentTokensAt(fileData: FixedValidationResult, name: string, position: Position, exactMatch = false): DasToken {
+	if (name.length === 0 || fileData.tokens.length === 0)
+		return null
+	let maxTokenIndex: integer = 0
+	for (let index = 0; index < fileData.tokens.length; index++) {
+		const t = fileData.tokens[index]
+		if (index > maxTokenIndex && isPositionLess(t._range.end, position)) {
+			maxTokenIndex = index
+			continue
+		}
+	}
+	for (let index = maxTokenIndex; index >= 0; index--) {
+		const t = fileData.tokens[index]
+		// if (t.kind == 'func' || t.kind == 'struct' || t.kind == 'enum') // top level tokens
+		// 	break
+		if (t.name === name) {
+			return t; // probably the best match
+		}
+	}
+	const exactName = fileData.tokens.find(t => t.name === name)
+	if (exactName != null)
+		return exactName
+	if (exactMatch)
+		return null
+	// lets try to find the shortest token
 	const res: DasToken[] = []
 	for (const tok of fileData.tokens) {
 		if (tok._uri != fileData.uri)
@@ -274,174 +289,72 @@ function getDocumentTokensAt(fileData: FixedValidationResult, position: Position
 	res.sort((a, b) => {
 		return isRangeLess(a._range, b._range) ? -1 : 1
 	})
-	// for (const st of fileData.completion.structs) {
-	// 	if (st.gen)
-	// 		continue
-	// 	if (st._uri != uri)
-	// 		continue
-	// 	if ((res == null || isRangeLess(st._range, resRange)) && posInRange(position, st._range)) {
-	// 		res = struct_docs(st)
-	// 		resUri = st._uri
-	// 		// resTdk = modPrefix(st.mod) + st.name // struct is already contains all required info
-	// 		resRange = st._range
-	// 		resDeclUri = st._uri
-	// 	}
-	// 	for (const stf of st.fields) {
-	// 		if ((res == null || isRangeLess(stf._range, resRange)) && posInRange(position, stf._range)) {
-	// 			res = struct_field_docs(stf, st)
-	// 			resUri = stf._uri
-	// 			resTdk = stf.tdk
-	// 			resRange = stf._range
-	// 			resDeclUri = stf._uri
-	// 		}
-	// 	}
-	// 	for (const g of fileData.completion.globals) {
-	// 		if (g.gen)
-	// 			continue
-	// 		if (g._uri != uri)
-	// 			continue
-	// 		if ((res == null || isRangeLess(g._range, resRange)) && posInRange(position, g._range)) {
-	// 			res = global_docs(g)
-	// 			resUri = g._uri
-	// 			resTdk = g.tdk
-	// 			resRange = g._range
-	// 			resDeclUri = g._uri
-	// 		}
-	// 	}
-	// 	for (const func of fileData.completion.functions) {
-	// 		if (func.gen)
-	// 			continue
-	// 		if (func._uri != uri)
-	// 			continue
-	// 		if ((res == null || isRangeLess(func._range, resRange)) && posInRange(position, func._range)) {
-	// 			res = funcDocs(func)
-	// 			resTdk = func.tdk
-	// 			resUri = func._uri
-	// 			resRange = func._range
-	// 			resDecl = func._declRange
-	// 			resDeclUri = func._declUri
-	// 		}
-	// 		for (const arg of func.args) {
-	// 			if (arg._uri != uri)
-	// 				continue
-	// 			if ((res == null || isRangeLess(arg._range, resRange)) && posInRange(position, arg._range)) {
-	// 				res = `${arg.name}: ${arg.tdk}`
-	// 				resTdk = arg.tdk
-	// 				resUri = arg._uri
-	// 				resRange = arg._range
-	// 				resDeclUri = arg._uri
-	// 			}
-	// 		}
-	// 	}
-	// 	// for (const td of fileData.completion.typeDecls) {
-	// 	// 	if ((res == null || isRangeLess(td._range, res.range)) && posInRange(textDocumentPosition.position, td._range)) {
-	// 	// 		res = {
-	// 	// 			contents: { kind: 'markdown', value: "```dascript\n" + type_decl_docs(td) + "\n```" },
-	// 	// 			range: td._range
-	// 	// 		}
-	// 	// 	}
-	// 	// }
-	// 	for (const td of fileData.completion.typeDefs) {
-	// 		if (td._uri != uri)
-	// 			continue
-	// 		if ((res == null || isRangeLess(td._range, resRange)) && posInRange(position, td._range)) {
-	// 			res = typedefDocs(td)
-	// 			resTdk = td.tdk
-	// 			resUri = td._uri
-	// 			resRange = td._range
-	// 			resDeclUri = td._uri
-	// 		}
-	// 	}
-	// 	for (const e of fileData.completion.enums) {
-	// 		if (e._uri != uri)
-	// 			continue
-	// 		if ((res == null || isRangeLess(e._range, resRange)) && posInRange(position, e._range)) {
-	// 			res = enum_docs(e)
-	// 			resMod = e.mod
-	// 			resTdk = e.name
-	// 			resUri = e._uri
-	// 			resRange = e._range
-	// 			resDeclUri = e._uri
-	// 		}
-	// 		for (const ev of e.values) {
-	// 			if (ev._uri != uri)
-	// 				continue
-	// 			if ((res == null || isRangeLess(ev._range, resRange)) && posInRange(position, ev._range)) {
-	// 				res = enumValueDocs(ev, e)
-	// 				resMod = e.mod
-	// 				resTdk = ev.name
-	// 				resUri = ev._uri
-	// 				resRange = ev._range
-	// 				resDeclUri = ev._uri
-	// 			}
-	// 		}
-	// 	}
-	// }
-	return res
+	return res[0]
 }
 
 connection.onHover(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return null
-	const toks = getDocumentTokensAt(fileData, textDocumentPosition.position)
-	if (toks.length == 0)
+	const doc = documents.get(textDocumentPosition.textDocument.uri)
+	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(textDocumentPosition.position))
+	const tok = getDocumentTokensAt(fileData, word, textDocumentPosition.position)
+	if (tok == null)
 		return null
 	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
 
+	// cursed code, but it works
 	let res = ""
 	let first = true
-	for (const tok of toks) {
-		if (!first)
-			res += "\n\n"
-		first = false
-		res += describeToken(tok)
-		if (settings.hovers.verbose) {
-			//
-		}
-		if (settings.experimental) {
-			res += `\n// ${tok.kind}`
-		}
+	if (!first)
+		res += "\n\n"
+	first = false
+	res += describeToken(tok)
+	if (settings.hovers.verbose) {
+		//
+	}
+	if (settings.experimental) {
+		res += `\n// ${tok.kind}`
+	}
 
-		if (tok.kind == 'field') {
-			res += `\n//^ ${tok.parentTdk}`
-		}
+	if (tok.kind == 'field') {
+		res += `\n//^ ${tok.parentTdk}`
+	}
 
-		if (tok.kind == 'ExprCall' /* || tok.kind == 'func' */) {
-			const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
-			if (func != null && func.cpp.length > 0)
-				res += `\n[::${func.cpp}(...)]`
-		}
-		else if (tok.tdk.length > 0) {
-			const showBaseType = tok.kind != 'ExprAddr'
-			for (const td of fileData.completion.typeDecls) {
-				if (td.tdk === tok.tdk) {
-					if (showBaseType && !primitiveBaseType(td, fileData.completion))
-						res += `\n${typeDeclDocs(td, fileData.completion)}`
-					const pos = typeDeclDefinition(td, fileData.completion)
-					if (pos._uri?.length > 0)
-						res += `\n//@@${pos._uri}`
-					if (!isRangeZeroEmpty(pos._range))
-						res += `\n//@@${JSON.stringify(pos._range)}`
-					break
-				}
+	if (tok.kind == 'ExprCall' /* || tok.kind == 'func' */) {
+		const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
+		if (func != null && func.cpp.length > 0)
+			res += `\n[::${func.cpp}(...)]`
+	}
+	else if (tok.tdk.length > 0) {
+		const showBaseType = tok.kind != 'ExprAddr'
+		for (const td of fileData.completion.typeDecls) {
+			if (td.tdk === tok.tdk) {
+				if (showBaseType && !primitiveBaseType(td, fileData.completion))
+					res += `\n${typeDeclDocs(td, fileData.completion)}`
+				const pos = typeDeclDefinition(td, fileData.completion)
+				if (pos._uri?.length > 0)
+					res += `\n//@@${pos._uri}`
+				if (!isRangeZeroEmpty(pos._range))
+					res += `\n//@@${JSON.stringify(pos._range)}`
+				break
 			}
 		}
-		if (settings.hovers.verbose) {
-			if (tok.declAt._uri?.length > 0)
-				res += `\n//@${tok.declAt._uri}`
-			if (!isRangeZeroEmpty(tok.declAt._range))
-				res += `\n//@${JSON.stringify(tok.declAt._range)}`
-		}
-		if (settings.experimental) {
-			if (tok._uri?.length > 0)
-				res += `\n//${tok._uri}`
-			res += `\n//${JSON.stringify(tok._range)}`
-		}
+	}
+	if (settings.hovers.verbose) {
+		if (tok.declAt._uri?.length > 0)
+			res += `\n//@${tok.declAt._uri}`
+		if (!isRangeZeroEmpty(tok.declAt._range))
+			res += `\n//@${JSON.stringify(tok.declAt._range)}`
+	}
+	if (settings.experimental) {
+		if (tok._uri?.length > 0)
+			res += `\n//${tok._uri}`
+		res += `\n//${JSON.stringify(tok._range)}`
 	}
 	return {
 		contents: { kind: 'markdown', value: "```dascript\n" + res + "\n```" },
-		range: toks[0]._range,
+		range: tok._range,
 	}
 })
 
@@ -449,8 +362,11 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const tokens = getDocumentTokensAt(fileData, typeDefinitionParams.position)
-	const res = tokens.length > 0 ? tokens[0] : null
+	const doc = documents.get(typeDefinitionParams.textDocument.uri)
+	if (!doc)
+		return null
+	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(typeDefinitionParams.position))
+	const res = getDocumentTokensAt(fileData, word, typeDefinitionParams.position)
 	if (res == null)
 		return null
 
@@ -494,8 +410,11 @@ connection.onDefinition(async (declarationParams) => {
 	const fileData = await getDocumentData(declarationParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const tokens = getDocumentTokensAt(fileData, declarationParams.position)
-	const res = tokens.length > 0 ? tokens[0] : null
+	const doc = documents.get(declarationParams.textDocument.uri)
+	if (!doc)
+		return null
+	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(declarationParams.position))
+	const res = getDocumentTokensAt(fileData, word, declarationParams.position)
 	if (res == null)
 		return null
 
@@ -1004,3 +923,23 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 }
 
 connection.listen()
+
+function getWorldUnderCursor(text: string, index: number) {
+	let i = index
+	let word = ""
+	for (; i >= 0; i--) {
+		const ch = text[i]
+		if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`'))
+			break
+	}
+	i++ // move to the first char of the word
+	for (; i < text.length; i++) {
+		const ch = text[i]
+		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
+			word += ch
+		else
+			break
+	}
+	return word
+}
+
