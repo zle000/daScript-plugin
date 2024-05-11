@@ -124,9 +124,10 @@ interface CallChain {
 }
 
 function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boolean): CallChain[] {
+	/// find key foo.key  foo().key  ... etc
+	/// support sequence of calls: foo.key.key2.key3
 	const line = txt.getText(Range.create(pos.line, 0, pos.line, pos.character))
 	let i = line.length - 1
-	// find key foo.key  foo().key  ... etc
 	let key = ""
 	for (; i >= 0; i--) {
 		const ch = line[i]
@@ -186,7 +187,6 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 				break
 		}
 
-
 		let afterBracket = i >= 0 && (line[i] === ']' || line[i] === ')')
 		if (afterBracket) {
 			let numO = 0 // ( )
@@ -236,6 +236,44 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 	return res
 }
 
+function getTokenAt(fileData: FixedValidationResult, name: string, position: Position, exactMatch = false): DasToken {
+	if (name.length === 0 || fileData.tokens.length === 0)
+		return null
+	let nearestPos = Position.create(0, 0)
+	let resToken: DasToken
+	for (let index = 0; index < fileData.tokens.length; index++) {
+		const t = fileData.tokens[index]
+		if (t.name === name && t._uri == fileData.uri && isPositionLess(t._range.start, position) && isPositionLess(nearestPos, t._range.start)) {
+			nearestPos = t._range.start
+			resToken = t
+			continue
+		}
+	}
+	if (resToken != null) {
+		return resToken
+	}
+	// maybe we have exact match somewhere
+	const exactName = fileData.tokens.find(t => t.name === name && t._uri != fileData.uri)
+	if (exactName != null)
+		return exactName
+	if (exactMatch)
+		return null
+	// lets try to find any token in given range
+	const res: DasToken[] = []
+	for (const tok of fileData.tokens) {
+		if (tok._uri == fileData.uri && posInRange(position, tok._range)) {
+			res.push(tok)
+		}
+	}
+	if (res.length === 0)
+		return null
+	res.sort((a, b) => {
+		return isRangeLess(a._range, b._range) ? -1 : 1
+	})
+	return res[0]
+}
+
+
 connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
@@ -247,7 +285,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 		if (completionToken.length > 1) {
 			// TODO: resolve all chain nodes
 			const objToken = completionToken[completionToken.length - 2]
-			const tok = getDocumentTokensAt(fileData, objToken.obj, rangeCenter(objToken.objRange), /*exact match*/true)
+			const tok = getTokenAt(fileData, objToken.obj, rangeCenter(objToken.objRange), /*exact match*/true)
 			if (tok && tok.tdk.length > 0) {
 				completionTdk = tok.tdk
 				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
@@ -285,45 +323,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 		}
 	}
 	return res.length > 0 ? res : fileData?.completionItems
-	// return fileData?.completionItems ?? []
 })
-
-function getDocumentTokensAt(fileData: FixedValidationResult, name: string, position: Position, exactMatch = false): DasToken {
-	if (name.length === 0 || fileData.tokens.length === 0)
-		return null
-	let nearestPos = Position.create(0, 0)
-	let resToken: DasToken
-	for (let index = 0; index < fileData.tokens.length; index++) {
-		const t = fileData.tokens[index]
-		if (t.name === name && t._uri == fileData.uri && isPositionLess(t._range.start, position) && isPositionLess(nearestPos, t._range.start)) {
-			nearestPos = t._range.start
-			resToken = t
-			continue
-		}
-	}
-	if (resToken != null) {
-		return resToken
-	}
-	// maybe we have exact match somewhere
-	const exactName = fileData.tokens.find(t => t.name === name && t._uri != fileData.uri)
-	if (exactName != null)
-		return exactName
-	if (exactMatch)
-		return null
-	// lets try to find any token in given range
-	const res: DasToken[] = []
-	for (const tok of fileData.tokens) {
-		if (tok._uri == fileData.uri && posInRange(position, tok._range)) {
-			res.push(tok)
-		}
-	}
-	if (res.length === 0)
-		return null
-	res.sort((a, b) => {
-		return isRangeLess(a._range, b._range) ? -1 : 1
-	})
-	return res[0]
-}
 
 connection.onHover(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
@@ -332,7 +332,7 @@ connection.onHover(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	const callChain = getCallChain(doc, textDocumentPosition.position, /*forAutocompletion*/false)
 	// TODO: resolve all chain nodes
-	const tok = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const tok = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (tok == null)
 		return null
 	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
@@ -399,7 +399,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	if (!doc)
 		return null
 	const callChain = getCallChain(doc, typeDefinitionParams.position, /*forAutocompletion*/false)
-	const res = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const res = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (res == null)
 		return null
 
@@ -438,7 +438,7 @@ connection.onReferences(async (referencesParams) => {
 	if (!doc)
 		return null
 	const callChain = getCallChain(doc, referencesParams.position, /*forAutocompletion*/false)
-	const res = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const res = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (res == null)
 		return null
 	console.log("references", referencesParams, res)
@@ -458,7 +458,7 @@ connection.onDefinition(async (declarationParams) => {
 	if (!doc)
 		return null
 	const callChain = getCallChain(doc, declarationParams.position, /*forAutocompletion*/false)
-	const res = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const res = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (res == null)
 		return null
 
