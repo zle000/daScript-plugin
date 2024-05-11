@@ -487,6 +487,13 @@ export function posInRange(pos: Position, range: Range) {
     return isPositionLessOrEqual(range.start, pos) && isPositionLessOrEqual(pos, range.end)
 }
 
+export function rangeCenter(range: Range) : Position {
+    return Position.create(
+        Math.round((range.start.line + range.end.line) / 2),
+        Math.round((range.start.character + range.end.character) / 2)
+    )
+}
+
 export function isRangeLess(a: Range, b: Range) {
     const lenA = a.end.line - a.start.line
     const lenB = b.end.line - b.start.line

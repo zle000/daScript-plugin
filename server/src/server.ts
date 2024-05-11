@@ -14,7 +14,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, posInRange, primitiveBaseType, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -118,14 +118,16 @@ connection.onInitialize((params) => {
 	}
 })
 
-function prevToken(txt: TextDocument, pos: Position): { obj: string; objRange: Range; key?: string; keyRange?: Range; afterBracket: boolean } {
-	const line = txt.getText(Range.create(pos.line, 0, pos.line, pos.character))
-	let key = ""
-	let obj = ""
-	let afterBracket = false
+interface CallChain {
+	obj: string
+	objRange: Range
+}
 
+function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boolean): CallChain[] {
+	const line = txt.getText(Range.create(pos.line, 0, pos.line, pos.character))
 	let i = line.length - 1
 	// find key foo.key  foo().key  ... etc
+	let key = ""
 	for (; i >= 0; i--) {
 		const ch = line[i]
 		if (ch === ' ' || ch === '\t') {
@@ -138,6 +140,16 @@ function prevToken(txt: TextDocument, pos: Position): { obj: string; objRange: R
 		else
 			break
 	}
+	if (!forAutocompletion) {
+		const text = txt.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 100))
+		for (let j = 0; j < text.length; j++) {
+			const ch = text[j]
+			if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
+				key += ch
+			else
+				break
+		}
+	}
 	const keyRange = Range.create(pos.line, i + 1, pos.line, i + 1 + key.length)
 	// skip spaces
 	for (; i >= 0; i--) {
@@ -145,63 +157,83 @@ function prevToken(txt: TextDocument, pos: Position): { obj: string; objRange: R
 		if (ch !== ' ' && ch !== '\t')
 			break
 	}
-	// TODO: add 'as' '?as' 'is' '?.' '|>' support
-	const hasDot = i >= 0 && line[i] === '.'
-	const hasSpace = i >= 0 && (line[i] === ' ') // enum?
-	if (!hasDot && !hasSpace) {
-		return { obj: key, objRange: keyRange, afterBracket: false }
-	}
-	i-- // ignore dot or space
-	// skip spaces
-	for (; i >= 0; i--) {
-		const ch = line[i]
-		if (ch !== ' ' && ch !== '\t')
+	const keyData: CallChain = { obj: key, objRange: keyRange }
+
+	let res: CallChain[] = [keyData]
+	while (i > 0) {
+		// '.' '?.' '->' 'as' 'is' '?as' '|>'
+		const hasDot = i >= 0 && line[i] === '.'
+		const hasMaybeDot = i > 0 && line[i] === '.' && line[i - 1] === '?'
+		const hasArrow = i > 0 && line[i] === '>' && line[i - 1] === '-'
+		const hasAs = i > 0 && line[i] === 's' && line[i - 1] === 'a'
+		const hasIs = i > 0 && line[i] === 's' && line[i - 1] === 'i'
+		const hasMaybeAs = i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?'
+		const hasPipe = i > 0 && line[i] === '>' && line[i - 1] === '|'
+		if (!hasDot && !hasMaybeDot && !hasArrow && !hasAs && !hasIs && !hasMaybeAs && !hasPipe) {
 			break
-	}
-
-	afterBracket = i >= 0 && (line[i] === ']' || line[i] === ')')
-	if (afterBracket) {
-		let numO = 0 // ( )
-		let numE = 0 // { }
-		let numD = 0 // [ ]
-		for (; i >= 0; i--) {
-			const ch = line[i]
-			if (ch === ')')
-				numO++
-			else if (ch === '(')
-				numO--
-			else if (ch === ']')
-				numD++
-			else if (ch === '[')
-				numD--
-			else if (ch === '}')
-				numE++
-			else if (ch === '{')
-				numE--
-			if ((ch == '(' || ch == '[' || ch == '{') && numO == 0 && numE == 0 && numD == 0) {
-				i-- // skip last bracket
-				break
-			}
 		}
-
+		--i // ignore dot or space
+		if (hasArrow || hasMaybeDot || hasAs || hasIs || hasMaybeAs || hasPipe) {
+			--i
+		}
+		if (hasMaybeAs) {
+			--i
+		}
 		// skip spaces
 		for (; i >= 0; i--) {
 			const ch = line[i]
 			if (ch !== ' ' && ch !== '\t')
 				break
 		}
+
+
+		let afterBracket = i >= 0 && (line[i] === ']' || line[i] === ')')
+		if (afterBracket) {
+			let numO = 0 // ( )
+			let numE = 0 // { }
+			let numD = 0 // [ ]
+			for (; i >= 0; i--) {
+				const ch = line[i]
+				if (ch === ')')
+					numO++
+				else if (ch === '(')
+					numO--
+				else if (ch === ']')
+					numD++
+				else if (ch === '[')
+					numD--
+				else if (ch === '}')
+					numE++
+				else if (ch === '{')
+					numE--
+				if ((ch == '(' || ch == '[' || ch == '{') && numO == 0 && numE == 0 && numD == 0) {
+					i-- // skip last bracket
+					break
+				}
+			}
+
+			// skip spaces
+			for (; i >= 0; i--) {
+				const ch = line[i]
+				if (ch !== ' ' && ch !== '\t')
+					break
+			}
+		}
+
+		let obj = ""
+		for (; i >= 0; i--) {
+			const ch = line[i]
+			if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
+				obj = ch + obj
+			else
+				break
+		}
+		if (obj.length === 0) { break }
+		const objRange = Range.create(pos.line, i + 1, pos.line, i + 1 + obj.length)
+		res.unshift({ obj: obj, objRange: objRange })
 	}
 
-	for (; i >= 0; i--) {
-		const ch = line[i]
-		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
-			obj = ch + obj
-		else
-			break
-	}
-	const objRange = Range.create(pos.line, i + 1, pos.line, i + 1 + obj.length)
-
-	return { obj: obj, objRange: objRange, key: key, keyRange: keyRange, afterBracket }
+	return res
 }
 
 connection.onCompletion(async (textDocumentPosition) => {
@@ -209,11 +241,13 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	const res: CompletionItem[] = []
 	if (doc) {
-		const completionToken = prevToken(doc, textDocumentPosition.position)
-		// console.log('text', JSON.stringify(token))
-		let completionTdk: string
-		if (completionToken.obj.length > 0) {
-			const tok = getDocumentTokensAt(fileData, completionToken.obj, completionToken.objRange.start, /*exact match*/true)
+		const completionToken = getCallChain(doc, textDocumentPosition.position, /*forAutocompletion*/true)
+		console.log(JSON.stringify(completionToken))
+		let completionTdk: string = ""
+		if (completionToken.length > 1) {
+			// TODO: resolve all chain nodes
+			const objToken = completionToken[completionToken.length - 2]
+			const tok = getDocumentTokensAt(fileData, objToken.obj, rangeCenter(objToken.objRange), /*exact match*/true)
 			if (tok && tok.tdk.length > 0) {
 				completionTdk = tok.tdk
 				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
@@ -221,18 +255,18 @@ connection.onCompletion(async (textDocumentPosition) => {
 					typeDeclCompletion(typeDeclData, fileData.completion, res)
 				}
 			}
-			else if (completionToken.obj.length > 0) {
-				// probably enum
-				const enumData = fileData.completion.enums.find(e => e.name === completionToken.obj)
-				if (enumData != null) {
-					completionTdk = enumData.tdk
-					for (const ev of enumData.values) {
-						const c = CompletionItem.create(ev.name)
-						c.detail = enumValueDetail(ev)
-						c.documentation = enumValueDocs(ev, enumData)
-						c.kind = CompletionItemKind.EnumMember
-						res.push(c)
-					}
+		}
+		else if (completionToken.length > 0) {
+			// probably enum
+			const enumData = fileData.completion.enums.find(e => e.name === completionToken[0].obj)
+			if (enumData != null) {
+				completionTdk = enumData.tdk
+				for (const ev of enumData.values) {
+					const c = CompletionItem.create(ev.name)
+					c.detail = enumValueDetail(ev)
+					c.documentation = enumValueDocs(ev, enumData)
+					c.kind = CompletionItemKind.EnumMember
+					res.push(c)
 				}
 			}
 		}
@@ -261,8 +295,8 @@ function getDocumentTokensAt(fileData: FixedValidationResult, name: string, posi
 	let resToken: DasToken
 	for (let index = 0; index < fileData.tokens.length; index++) {
 		const t = fileData.tokens[index]
-		if (t.name === name && t._uri == fileData.uri && isPositionLess(t._range.end, position) && isPositionLess(nearestPos, t._range.end)) {
-			nearestPos = t._range.end
+		if (t.name === name && t._uri == fileData.uri && isPositionLess(t._range.start, position) && isPositionLess(nearestPos, t._range.start)) {
+			nearestPos = t._range.start
 			resToken = t
 			continue
 		}
@@ -296,8 +330,9 @@ connection.onHover(async (textDocumentPosition) => {
 	if (!fileData)
 		return null
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
-	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(textDocumentPosition.position))
-	const tok = getDocumentTokensAt(fileData, word, textDocumentPosition.position)
+	const callChain = getCallChain(doc, textDocumentPosition.position, /*forAutocompletion*/false)
+	// TODO: resolve all chain nodes
+	const tok = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (tok == null)
 		return null
 	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
@@ -363,8 +398,8 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const doc = documents.get(typeDefinitionParams.textDocument.uri)
 	if (!doc)
 		return null
-	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(typeDefinitionParams.position))
-	const res = getDocumentTokensAt(fileData, word, typeDefinitionParams.position)
+	const callChain = getCallChain(doc, typeDefinitionParams.position, /*forAutocompletion*/false)
+	const res = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (res == null)
 		return null
 
@@ -402,8 +437,8 @@ connection.onReferences(async (referencesParams) => {
 	const doc = documents.get(referencesParams.textDocument.uri)
 	if (!doc)
 		return null
-	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(referencesParams.position))
-	const res = getDocumentTokensAt(fileData, word, referencesParams.position)
+	const callChain = getCallChain(doc, referencesParams.position, /*forAutocompletion*/false)
+	const res = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (res == null)
 		return null
 	console.log("references", referencesParams, res)
@@ -422,8 +457,8 @@ connection.onDefinition(async (declarationParams) => {
 	const doc = documents.get(declarationParams.textDocument.uri)
 	if (!doc)
 		return null
-	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(declarationParams.position))
-	const res = getDocumentTokensAt(fileData, word, declarationParams.position)
+	const callChain = getCallChain(doc, declarationParams.position, /*forAutocompletion*/false)
+	const res = callChain.length == 1 ? getDocumentTokensAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
 	if (res == null)
 		return null
 
@@ -952,23 +987,3 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 }
 
 connection.listen()
-
-function getWorldUnderCursor(text: string, index: number) {
-	let i = index
-	let word = ""
-	for (; i >= 0; i--) {
-		const ch = text[i]
-		if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`'))
-			break
-	}
-	i++ // move to the first char of the word
-	for (; i < text.length; i++) {
-		const ch = text[i]
-		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
-			word += ch
-		else
-			break
-	}
-	return word
-}
-
