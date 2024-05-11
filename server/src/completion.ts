@@ -4,6 +4,9 @@ import fs = require('fs')
 import path = require('path')
 import { URI } from 'vscode-uri'
 
+export function isValidIdChar(ch: string) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`'
+}
 
 function modPrefix(mod: string) {
     if (mod.length === 0)

@@ -14,7 +14,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -135,7 +135,7 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 				continue
 			break
 		}
-		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
+		if (isValidIdChar(ch))
 			key = ch + key
 		else
 			break
@@ -144,7 +144,7 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 		const text = txt.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 100))
 		for (let j = 0; j < text.length; j++) {
 			const ch = text[j]
-			if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
+			if (isValidIdChar(ch))
 				key += ch
 			else
 				break
@@ -223,7 +223,7 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 		let obj = ""
 		for (; i >= 0; i--) {
 			const ch = line[i]
-			if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`')
+			if (isValidIdChar(ch))
 				obj = ch + obj
 			else
 				break
