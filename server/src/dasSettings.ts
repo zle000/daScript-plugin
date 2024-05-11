@@ -26,6 +26,7 @@ export interface DasSettings {
 		port: integer;
 	};
 	experimental?: boolean;
+	colorPreviewFormat?: string;
 }
 
 export const defaultSettings: DasSettings = {

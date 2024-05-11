@@ -34,6 +34,7 @@ export interface DasToken extends CompletionAt {
 }
 
 export function describeToken(tok: DasToken) {
+    // cursed code, but it works
     let res = ""
     if (tok.kind == 'ExprCall' || tok.kind == 'func')
         res += tok.value

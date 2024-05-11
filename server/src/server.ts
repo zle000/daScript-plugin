@@ -94,7 +94,8 @@ connection.onInitialize((params) => {
 			// declarationProvider: true,
 			typeDefinitionProvider: true,
 			documentSymbolProvider: true,
-			// referencesProvider: true,
+			referencesProvider: true,
+			// colorProvider: true,
 			// documentHighlightProvider : true, // TODO: implement
 			// workspace: {
 			// fileOperations:{}
@@ -144,7 +145,7 @@ function prevToken(txt: TextDocument, pos: Position): { obj: string; objRange: R
 		if (ch !== ' ' && ch !== '\t')
 			break
 	}
-	// TODO: add 'as' '?as' 'is' '?.' support
+	// TODO: add 'as' '?as' 'is' '?.' '|>' support
 	const hasDot = i >= 0 && line[i] === '.'
 	const hasSpace = i >= 0 && (line[i] === ' ') // enum?
 	if (!hasDot && !hasSpace) {
@@ -256,36 +257,34 @@ connection.onCompletion(async (textDocumentPosition) => {
 function getDocumentTokensAt(fileData: FixedValidationResult, name: string, position: Position, exactMatch = false): DasToken {
 	if (name.length === 0 || fileData.tokens.length === 0)
 		return null
-	let maxTokenIndex: integer = 0
+	let nearestPos = Position.create(0, 0)
+	let resToken: DasToken
 	for (let index = 0; index < fileData.tokens.length; index++) {
 		const t = fileData.tokens[index]
-		if (index > maxTokenIndex && isPositionLess(t._range.end, position)) {
-			maxTokenIndex = index
+		if (t.name === name && t._uri == fileData.uri && isPositionLess(t._range.end, position) && isPositionLess(nearestPos, t._range.end)) {
+			nearestPos = t._range.end
+			resToken = t
 			continue
 		}
 	}
-	for (let index = maxTokenIndex; index >= 0; index--) {
-		const t = fileData.tokens[index]
-		// if (t.kind == 'func' || t.kind == 'struct' || t.kind == 'enum') // top level tokens
-		// 	break
-		if (t.name === name) {
-			return t; // probably the best match
-		}
+	if (resToken != null) {
+		return resToken
 	}
-	const exactName = fileData.tokens.find(t => t.name === name)
+	// maybe we have exact match somewhere
+	const exactName = fileData.tokens.find(t => t.name === name && t._uri != fileData.uri)
 	if (exactName != null)
 		return exactName
 	if (exactMatch)
 		return null
-	// lets try to find the shortest token
+	// lets try to find any token in given range
 	const res: DasToken[] = []
 	for (const tok of fileData.tokens) {
-		if (tok._uri != fileData.uri)
-			continue
-		if (posInRange(position, tok._range)) {
+		if (tok._uri == fileData.uri && posInRange(position, tok._range)) {
 			res.push(tok)
 		}
 	}
+	if (res.length === 0)
+		return null
 	res.sort((a, b) => {
 		return isRangeLess(a._range, b._range) ? -1 : 1
 	})
@@ -303,7 +302,6 @@ connection.onHover(async (textDocumentPosition) => {
 		return null
 	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
 
-	// cursed code, but it works
 	let res = ""
 	let first = true
 	if (!first)
@@ -397,10 +395,21 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	return null
 })
 
-// connection.onReferences(async (referencesParams) => {
-// 	console.log("references", referencesParams)
-// 	return null
-// })
+connection.onReferences(async (referencesParams) => {
+	const fileData = await getDocumentData(referencesParams.textDocument.uri)
+	if (!fileData)
+		return null
+	const doc = documents.get(referencesParams.textDocument.uri)
+	if (!doc)
+		return null
+	const word = getWorldUnderCursor(doc.getText(), doc.offsetAt(referencesParams.position))
+	const res = getDocumentTokensAt(fileData, word, referencesParams.position)
+	if (res == null)
+		return null
+	console.log("references", referencesParams, res)
+	// NOTE:! take in count declAt
+	return null
+})
 
 // connection.onDeclaration(async (declarationParams) => {
 // 	console.log("declaration", declarationParams)
@@ -475,6 +484,26 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	if (!fileData)
 		return null
 	const res: SymbolInformation[] = []
+	// TODO: add structures, enums, typedefs, etc
+	// TODO: use DocumentSymbol to support nested structures
+	for (const st of fileData.completion.structs) {
+		if (st._uri != documentSymbolParams.textDocument.uri)
+			continue
+		res.push({
+			name: st.name,
+			kind: st.isClass ? SymbolKind.Class : SymbolKind.Struct,
+			location: Location.create(st._uri, st._range),
+			containerName: st.parentName,
+		})
+		for (const f of st.fields) {
+			res.push({
+				name: f.name,
+				kind: SymbolKind.Field,
+				location: Location.create(f._uri, f._range),
+				containerName: st.name,
+			})
+		}
+	}
 	for (const tok of fileData.tokens) {
 		const fnToken = tok.kind == 'func'
 		if (!fnToken)
