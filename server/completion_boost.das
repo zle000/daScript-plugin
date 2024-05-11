@@ -8,6 +8,7 @@ options no_aot
 require ast
 require rtti
 require strings
+require daslib/strings_boost
 
 
 struct CompletionAt
@@ -212,16 +213,7 @@ def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Struct
 
 def TypeDeclKey(t : smart_ptr<ast::TypeDecl>&)
     var res = t |> describe_typedecl(false, false, true)
-    if res |> ends_with(" ==const")
-        res = res |> slice(0, length(res) - 8)
-    if res |> ends_with("&")
-        res = res |> slice(0, length(res) - 1)
-    if res |> ends_with("#")
-        res = res |> slice(0, length(res) - 1)
-    if res |> ends_with(" implicit")
-        res = res |> slice(0, length(res) - 10)
-    if res |> ends_with(" const")
-        res = res |> slice(0, length(res) - 6)
+    res = replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
     return res
 
 // def TypeDeclString(t : smart_ptr<ast::TypeDecl>&)
