@@ -522,6 +522,8 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	// TODO: add structures, enums, typedefs, etc
 	// TODO: use DocumentSymbol to support nested structures
 	for (const st of fileData.completion.structs) {
+		if (st.gen)
+			continue
 		if (st._uri != documentSymbolParams.textDocument.uri)
 			continue
 		res.push({
@@ -531,6 +533,8 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 			containerName: st.parentName,
 		})
 		for (const f of st.fields) {
+			if (f.gen)
+				continue
 			res.push({
 				name: f.name,
 				kind: SymbolKind.Field,
@@ -742,7 +746,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			if (result != null) {
 				for (const error of result.errors) {
 					error._range = AtToRange(error)
-					error._uri = AtToUri(error, textDocument.uri, settings)
+					error._uri = AtToUri(error, textDocument.uri, settings, result.dasRoot)
 
 					const diag: Diagnostic = { range: error._range, message: error.what, code: error.cerr, severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning }
 					if (error.extra?.length > 0 || error.fixme?.length > 0) {
@@ -812,7 +816,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		const map = new Array<Map<string, CompletionItem>>()
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)
-			e._uri = AtToUri(e, uri, settings)
+			e._uri = AtToUri(e, uri, settings, res.dasRoot)
 			addCompletionItem(map, {
 				label: e.name,
 				kind: CompletionItemKind.Enum,
@@ -837,7 +841,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			// })
 			for (const ev of e.values) {
 				ev._range = AtToRange(ev)
-				ev._uri = AtToUri(ev, uri, settings)
+				ev._uri = AtToUri(ev, uri, settings, res.dasRoot)
 				addCompletionItem(map, {
 					label: ev.name,
 					kind: CompletionItemKind.EnumMember,
@@ -865,7 +869,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		for (const s of res.completion.structs) {
 			s.column = Math.max(s.column - 5, 0) // magic number to fix column
 			s._range = AtToRange(s)
-			s._uri = AtToUri(s, uri, settings)
+			s._uri = AtToUri(s, uri, settings, res.dasRoot)
 			addCompletionItem(map, {
 				label: s.name,
 				kind: s.isClass ? CompletionItemKind.Class : CompletionItemKind.Struct,
@@ -886,7 +890,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const t of res.completion.typeDecls) {
 			t._range = AtToRange(t)
-			t._uri = AtToUri(t, uri, settings)
+			t._uri = AtToUri(t, uri, settings, res.dasRoot)
 			addCompletionItem(map, {
 				label: t.tdk,
 				kind: baseTypeToCompletionItemKind(t.baseType),
@@ -904,7 +908,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const t of res.completion.typeDefs) {
 			t._range = AtToRange(t)
-			t._uri = AtToUri(t, uri, settings)
+			t._uri = AtToUri(t, uri, settings, res.dasRoot)
 			const valueType = res.completion.typeDecls.find(td => td.tdk === t.tdk)
 			addCompletionItem(map, {
 				label: t.name,
@@ -915,7 +919,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const g of res.completion.globals) {
 			g._range = AtToRange(g)
-			g._uri = AtToUri(g, uri, settings)
+			g._uri = AtToUri(g, uri, settings, res.dasRoot)
 			addCompletionItem(map, {
 				label: g.name,
 				kind: CompletionItemKind.Variable,
@@ -925,9 +929,9 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const f of res.completion.functions) {
 			f._range = AtToRange(f)
-			f._uri = AtToUri(f, uri, settings)
+			f._uri = AtToUri(f, uri, settings, res.dasRoot)
 			f.decl._range = AtToRange(f.decl)
-			f.decl._uri = AtToUri(f.decl, uri, settings)
+			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot)
 			addCompletionItem(map, {
 				label: f.name,
 				kind: CompletionItemKind.Function,
@@ -936,7 +940,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			})
 			for (const arg of f.args) {
 				arg._range = AtToRange(arg)
-				arg._uri = AtToUri(arg, uri, settings)
+				arg._uri = AtToUri(arg, uri, settings, res.dasRoot)
 				addCompletionItem(map, {
 					label: arg.name,
 					kind: CompletionItemKind.Variable,
@@ -950,7 +954,10 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		fixedResults.tokens = []
 
 		for (const token of tokens) {
-			token._uri = AtToUri(token, uri, settings)
+			if (token.file.indexOf("network.das") >= 0) {
+				console.log("token", token)
+			}
+			token._uri = AtToUri(token, uri, settings, res.dasRoot)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
 			if (token.kind == 'ExprField')
@@ -959,7 +966,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			// declAt is negative for tokens that are not declared in the source code
 			if (token.declAt.line >= 0) {
 				token.declAt._range = AtToRange(token.declAt)
-				token.declAt._uri = AtToUri(token.declAt, uri, settings)
+				token.declAt._uri = AtToUri(token.declAt, uri, settings, res.dasRoot)
 			}
 			else {
 				token.declAt._range = Range.create(0, 0, 0, 0)

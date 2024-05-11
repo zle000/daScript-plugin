@@ -443,9 +443,10 @@ export interface ValidationResult {
     errors: DasError[]
     tokens: DasToken[]
     completion: CompletionResult
+    dasRoot: string
 }
 
-export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings) {
+export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string) {
     if (at.file?.length == 0)
         return ""
 
@@ -461,7 +462,7 @@ export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSett
     }
 
     for (const dir of ['daslib', 'src/builtin']) {
-        const full = path.join(dir, at.file)
+        const full = path.join(dasRoot, dir, at.file)
         if (fs.existsSync(full)) {
             return URI.file(full).toString()
         }
@@ -490,7 +491,7 @@ export function posInRange(pos: Position, range: Range) {
     return isPositionLessOrEqual(range.start, pos) && isPositionLessOrEqual(pos, range.end)
 }
 
-export function rangeCenter(range: Range) : Position {
+export function rangeCenter(range: Range): Position {
     return Position.create(
         Math.round((range.start.line + range.end.line) / 2),
         Math.round((range.start.character + range.end.character) / 2)

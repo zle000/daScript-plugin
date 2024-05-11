@@ -65,6 +65,7 @@ def main()
 
     var res <- ValidationResult()
     res |> compile(config)
+    res.dasRoot = get_das_root()
 
     let textRes = res |> to_json()
 
@@ -90,6 +91,8 @@ struct ValidationResult
     tokens : array<DasToken>
     errors : array<DasError>
     completion : CompletionResult
+    dasRoot : string
+
 
 def init_file_access(var access; fileAccessorRoots : table<string; string>)
     for rootName, rootPath in keys(fileAccessorRoots), values(fileAccessorRoots)
