@@ -311,7 +311,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	const res: CompletionItem[] = []
 	const completionToken = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
-	console.log(JSON.stringify(completionToken))
+	// console.log(JSON.stringify(completionToken))
 	let completionTdk: string = ""
 	if (completionToken.length > 1) {
 		// TODO: resolve all chain nodes
@@ -360,7 +360,7 @@ connection.onHover(async (textDocumentPosition) => {
 	if (!fileData)
 		return null
 	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/false)
-	console.log(JSON.stringify(callChain))
+	// console.log(JSON.stringify(callChain))
 	// TODO: resolve all chain nodes
 	const tok = findTokenAtChain(fileData, callChain)
 	if (tok == null)
@@ -444,7 +444,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 		}
 	}
 
-	if (res.kind == "struct") {
+	if (res.kind == "struct" || res.kind == "handle") {
 		// it's fast :)
 		const st = fileData.completion.structs.find(st => st.name === res.name && st.mod === res.mod)
 		if (st != null) {
@@ -522,7 +522,7 @@ connection.onDefinition(async (declarationParams) => {
 		// name === goto label 0 -> label 0
 	}
 
-	if (res.kind == "struct") {
+	if (res.kind == "struct" || res.kind == "handle") {
 		const childStructs: Location[] = []
 		for (const st of fileData.completion.structs) {
 			if (st.parentName === res.name && st.parentMod === res.mod && st._uri.length > 0 && !isRangeZeroEmpty(st._range)) {

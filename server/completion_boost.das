@@ -210,11 +210,14 @@ def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Struct
     res.result.structs |> emplace(st)
 
 /// type decl
+def cleanupTDK(res : string) : string
+    return replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
 
 def TypeDeclKey(t : smart_ptr<ast::TypeDecl>&)
-    var res = t |> describe_typedecl(false, false, true)
-    res = replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
-    return res
+    return t |> describe_typedecl(false, false, true) |> cleanupTDK()
+
+def TypeDeclKey(t : TypeInfo&)
+    return unsafe(addr(t)) |> describe() |> cleanupTDK()
 
 // def TypeDeclString(t : smart_ptr<ast::TypeDecl>&)
 //     return t |> describe_typedecl(true, true, true)
@@ -273,6 +276,11 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
     if t.structType != null
         td.structName = t.structType.name |> string()
         td.mod = t.structType._module != null ? t.structType._module.name |> string() : ""
+    if t.annotation != null
+        // td.alignOf = t.annotation.alignOf
+        // td.sizeOf = t.annotation.sizeOf
+        td.structName = t.annotation.name |> string()
+        td.mod = t.annotation._module != null ? t.annotation._module.name |> string() : ""
     if t.firstType != null
         td.tdk1 = TypeDeclKey(t.firstType)
         res |> parse_typedecl(td.tdk1, t.firstType)
@@ -335,6 +343,34 @@ def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : 
         fn.args |> emplace(fa)
     res.result.functions |> emplace(fn)
 
+
+def parse_annotation(var res : CompletionContext; ann : Annotation&)
+    if ann.isBasicStructureAnnotation
+        let sann & = unsafe(reinterpret<BasicStructureAnnotation&> (ann))
+        var st <- [[CompletionStruct() name="{sann.name}"]]
+        if ann._module != null
+            st.mod = ann._module.name |> string()
+        basic_struct_for_each_field(sann) <| $[unused_argument(cppName)](name, cppName, xtype, offset)
+            var field <- [[CompletionStructField() name="{name}"]]
+            field.tdk = TypeDeclKey(xtype)
+            // res |> parse_typedecl(field.tdk, xtype)
+            field.offset = int(offset)
+            st.fields |> emplace(field)
+        res.result.structs |> emplace(st)
+
+    elif ann.isTypeAnnotation
+        let tann & = unsafe(reinterpret<TypeAnnotation&> (ann))
+        var td <- [[CompletionStruct() name="{tann.name}"]]
+        if ann._module != null
+            td.mod = "{ann._module.name}"
+        res.result.structs |> emplace(td)
+
+    else
+        var td <- [[CompletionStruct() name="{ann.name}"]]
+        if ann._module != null
+            td.mod = "{ann._module.name}"
+        res.result.structs |> emplace(td)
+
 /// module
 
 def parse_module(var res : CompletionContext; mod : rtti::Module?)
@@ -366,3 +402,6 @@ def parse_module(var res : CompletionContext; mod : rtti::Module?)
     mod |> for_each_function("") <| $(f)
         // debug(f)
         res |> parse_function(f, funcCppNames?[string(f.name)] ?? "")
+
+    mod |> module_for_each_annotation() <| $(a)
+        res |> parse_annotation(a)

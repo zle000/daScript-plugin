@@ -41,7 +41,7 @@ export function describeToken(tok: DasToken) {
     let res = ""
     if (tok.kind == 'ExprCall' || tok.kind == 'func')
         res += tok.value
-    else if (tok.kind == 'struct')
+    else if (tok.kind == 'struct' || tok.kind == 'handle')
         res += `struct ${tok.name}`
     else if (tok.kind == 'typedecl')
         res += tok.tdk
@@ -261,7 +261,7 @@ export function primitiveBaseType(td: CompletionTypeDecl, cr: CompletionResult):
 
 // TODO: print dim size
 export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): string {
-    if (td.baseType === 'structure') {
+    if (td.baseType === 'structure' || td.baseType === 'handle') {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st)
             return structDocs(st)
@@ -311,7 +311,7 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
 
 
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, res: CompletionItem[]): void {
-    if (td.baseType === 'structure') {
+    if (td.baseType === 'structure' || td.baseType === 'handle') {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st) {
             st.fields.forEach(f => {
