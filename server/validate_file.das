@@ -37,6 +37,7 @@ struct ValidateConfig
 
     fileAccessRoots : table<string; string>
 
+let WRITE_RESULT = true
 let WRITE_RESULT_TO_FILE = true
 
 [export]
@@ -75,7 +76,8 @@ def main()
         fopen("results/{fileName}.json", "w") <| $(f)
             f |> fwrite(textRes)
 
-    textRes |> print()
+    if WRITE_RESULT
+        textRes |> print()
 
 
 struct DasError : CompletionAt
@@ -129,11 +131,14 @@ def compile(var res : ValidationResult; config : ValidateConfig)
 
 
                         if ok && program != null
-                            pass
                             var inscope completion <- CompletionContext()
+                            var processed : table<string>
                             program |> get_ptr() |> for_each_module() <| $(mod)
-                                // print("{mod}")
                                 completion |> parse_module(mod)
+                                processed |> insert("{mod.name}")
+                            program_for_each_registered_module() <| $(mod)
+                                if !key_exists(processed, "{mod.name}")
+                                    completion |> parse_module(mod)
 
                             var visitor <- new AstData()
                             visitor.res = unsafe(addr(res))

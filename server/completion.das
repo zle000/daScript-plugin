@@ -9,14 +9,14 @@ require ast
 require completion_boost
 require fio
 
-let WRITE_RESULT = true
+let WRITE_RESULT = false
 let WRITE_RESULT_TO_FILE = true
 
 [export]
 def main()
     var result <- CompletionContext()
     program_for_each_registered_module() <| $(mod)
-        // print("{mod}")
+        // print("{mod.name}\n")
         result |> parse_module(mod)
 
     let textRes = result.result |> to_json()
