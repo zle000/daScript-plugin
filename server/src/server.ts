@@ -352,7 +352,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 			}
 		}
 	}
-	return res.length > 0 ? res : fileData?.completionItems
+	return res.length > 0 ? res : fileData.completionItems
 })
 
 connection.onHover(async (textDocumentPosition) => {
@@ -555,7 +555,7 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 			children: [],
 		}
 		for (const f of st.fields) {
-			if (f.gen)
+			if (f.gen || f.name === "__rtti")
 				continue
 			if (f._uri != documentSymbolParams.textDocument.uri)
 				continue
@@ -567,6 +567,17 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 			})
 		}
 		res.push(stRes)
+	}
+	for (const td of fileData.completion.typeDefs) {
+		if (td._uri != documentSymbolParams.textDocument.uri)
+			continue
+		res.push({
+			name: td.name,
+			kind: SymbolKind.Interface,
+			detail: typedefDetail(td),
+			range: td._range,
+			selectionRange: td._range,
+		})
 	}
 	for (const fn of fileData.completion.functions) {
 		if (fn.gen || fn.isClassMethod)

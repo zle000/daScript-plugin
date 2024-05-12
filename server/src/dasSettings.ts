@@ -26,7 +26,7 @@ export interface DasSettings {
 		port: integer;
 	};
 	experimental?: boolean;
-	colorPreviewFormat?: string;
+	colorPreviewFormat?: string; // ARGB (default) or RGBA
 }
 
 export const defaultSettings: DasSettings = {
