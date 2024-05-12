@@ -206,7 +206,7 @@ export
 }
 
 export function typeDeclDefinition(td: CompletionTypeDecl, cr: CompletionResult): CompletionAt {
-    if (td.baseType === 'structure') {
+    if (td.baseType === 'structure' || td.baseType === 'handle') {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st)
             return st
