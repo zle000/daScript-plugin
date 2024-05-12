@@ -311,13 +311,13 @@ class AstData : AstVisitor
             return
         var token <- DasToken(expr, completion)
         token.name = "{expr.name}"
-        token.value = "def {expr.name}"
+        token.value = "def {expr.name}("
         if expr.func != null
             token.mod = expr.func._module != null ? "{expr.func._module.name}" : ""
             token.declAt |> fill_at(expr.func.at)
             var first = true
             for a in expr.func.arguments
-                token.value += first ? "(" : ", "
+                token.value += first ? "" : ", "
                 first = false
                 token.value += "{a.name}"
                 if a._type != null
