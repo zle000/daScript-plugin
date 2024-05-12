@@ -132,12 +132,12 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 	let key = ""
 	for (; i >= 0; i--) {
 		const ch = line[i]
-		if (ch === ' ' || ch === '\t') {
+		if (forAutocompletion && (ch === ' ' || ch === '\t')) {
 			if (key.length === 0)
 				continue
 			break
 		}
-		if (isValidIdChar(ch))
+		if ((forAutocompletion && isValidIdChar(ch) || (ch !== ' ' && ch !== '\t')))
 			key = ch + key
 		else
 			break
@@ -146,7 +146,7 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 		const text = txt.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 100))
 		for (let j = 0; j < text.length; j++) {
 			const ch = text[j]
-			if (isValidIdChar(ch))
+			if ((ch !== ' ' && ch !== '\t'))
 				key += ch
 			else
 				break
