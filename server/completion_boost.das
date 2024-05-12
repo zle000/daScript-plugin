@@ -311,6 +311,7 @@ struct CompletionFunction : CompletionAt
     decl : CompletionAt
     args : array<CompletionFuncArg>
     gen : bool
+    isClassMethod : bool
 
 def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : string)
     var fn <- [[CompletionFunction() name="{f.name}", cpp="{cpp}"]]
@@ -322,6 +323,7 @@ def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : 
         res |> parse_typedecl(fn.tdk, f.result)
     fn.decl |> fill_at(f.atDecl)
     fn.gen = f.flags.generated
+    fn.isClassMethod = f.flags.isClassMethod
     for arg in f.arguments
         var fa <- [[CompletionFuncArg() name="{arg.name}"]]
         fa |> fill_at(arg.at)

@@ -1,7 +1,8 @@
 
 import {
 	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Hover, MarkupContent, Location, DiagnosticSeverity, SymbolKind, SymbolInformation,
-	Position
+	Position,
+	DocumentSymbol
 } from 'vscode-languageserver/node'
 
 import {
@@ -518,45 +519,63 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	const fileData = await getDocumentData(documentSymbolParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const res: SymbolInformation[] = []
-	// TODO: add structures, enums, typedefs, etc
-	// TODO: use DocumentSymbol to support nested structures
+	const res: DocumentSymbol[] = []
+	// TODO: add enums, typedefs, etc
 	for (const st of fileData.completion.structs) {
 		if (st.gen)
 			continue
 		if (st._uri != documentSymbolParams.textDocument.uri)
 			continue
-		res.push({
+		const stRes: DocumentSymbol = {
 			name: st.name,
 			kind: st.isClass ? SymbolKind.Class : SymbolKind.Struct,
-			location: Location.create(st._uri, st._range),
-			containerName: st.parentName,
-		})
+			detail: structDetail(st),
+			range: st._range,
+			selectionRange: st._range,
+			children: [],
+		}
 		for (const f of st.fields) {
 			if (f.gen)
 				continue
-			res.push({
+			if (f._uri != documentSymbolParams.textDocument.uri)
+				continue
+			stRes.children.push({
 				name: f.name,
 				kind: SymbolKind.Field,
-				location: Location.create(f._uri, f._range),
-				containerName: st.name,
+				range: f._range,
+				selectionRange: f._range,
 			})
 		}
+		res.push(stRes)
 	}
-	for (const tok of fileData.tokens) {
-		const fnToken = tok.kind == 'func'
-		if (!fnToken)
+	for (const fn of fileData.completion.functions) {
+		if (fn.gen || fn.isClassMethod)
 			continue
-		if (tok._uri != documentSymbolParams.textDocument.uri)
+		if (fn._uri != documentSymbolParams.textDocument.uri)
 			continue
-
 		res.push({
-			name: describeToken(tok),
-			kind: fnToken ? SymbolKind.Function : SymbolKind.Variable,
-			location: Location.create(tok._uri, tok._range),
-			containerName: tok.mod,
+			name: fn.name,
+			kind: SymbolKind.Function,
+			detail: funcDetail(fn),
+			range: fn._range,
+			selectionRange: fn._range,
 		})
 	}
+	// for (const tok of fileData.tokens) {
+	// 	const fnToken = tok.kind == 'func'
+	// 	if (!fnToken)
+	// 		continue
+	// 	if (tok._uri != documentSymbolParams.textDocument.uri)
+	// 		continue
+
+	// 	res.push({
+	// 		name: tok.name,
+	// 		detail: describeToken(tok),
+	// 		kind: fnToken ? SymbolKind.Function : SymbolKind.Variable,
+	// 		range: tok._range,
+	// 		selectionRange: tok._range,
+	// 	})
+	// }
 	return res
 })
 
@@ -660,7 +679,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 	// console.log('validResult', validResult)
 	if (validResult?.fileVersion === textDocument.version) {
 		console.log('document version not changed, ignoring', textDocument.uri)
-		return prevProcess.promise
+		return Promise.resolve()
 	}
 	const fileVersion = textDocument.version
 	const settings = await getDocumentSettings(textDocument.uri)
@@ -880,6 +899,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 				// TODO: search for the field end using textDocument.getText()
 				// sf.columnEnd += sf.tdk.length + 1 // 1 char for ':'
 				sf._range = AtToRange(sf)
+				sf._uri = AtToUri(sf, uri, settings, res.dasRoot)
 				addCompletionItem(map, {
 					label: sf.name,
 					kind: CompletionItemKind.Field,
@@ -954,9 +974,6 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		fixedResults.tokens = []
 
 		for (const token of tokens) {
-			if (token.file.indexOf("network.das") >= 0) {
-				console.log("token", token)
-			}
 			token._uri = AtToUri(token, uri, settings, res.dasRoot)
 			if (token._uri != uri) // filter out tokens from other files
 				continue

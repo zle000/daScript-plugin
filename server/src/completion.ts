@@ -413,6 +413,7 @@ export interface CompletionFunction extends CompletionAt {
     decl: CompletionAt
     args: CompletionFuncArg[]
     gen: boolean
+    isClassMethod: boolean
 }
 
 export function funcRetTypeSuffix(retType: string) {
