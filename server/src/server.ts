@@ -122,44 +122,64 @@ connection.onInitialize((params) => {
 interface CallChain {
 	obj: string
 	objRange: Range
+	token?: DasToken
 }
 
-function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boolean): CallChain[] {
+function findCallChain(fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
 	/// find key foo.key  foo().key  ... etc
 	/// support sequence of calls: foo.key.key2.key3
-	const line = txt.getText(Range.create(pos.line, 0, pos.line, pos.character))
-	let i = line.length - 1
+	const doc = documents.get(fileData.uri)
+	if (doc == null)
+		return []
+	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
 	let key = ""
-	for (; i >= 0; i--) {
-		const ch = line[i]
-		if (forAutocompletion && (ch === ' ' || ch === '\t')) {
-			if (key.length === 0)
-				continue
-			break
-		}
-		if ((forAutocompletion && isValidIdChar(ch) || (ch !== ' ' && ch !== '\t')))
-			key = ch + key
-		else
-			break
-	}
+	let keyRange: Range
+	let i = line.length - 1
+	let tok: DasToken = null
 	if (!forAutocompletion) {
-		const text = txt.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 100))
-		for (let j = 0; j < text.length; j++) {
-			const ch = text[j]
-			if ((ch !== ' ' && ch !== '\t'))
-				key += ch
+		// lets try to find token under cursor
+		tok = findTokenUnderCursor(fileData, pos)
+		if (tok != null) {
+			key = tok.name
+			keyRange = tok._range
+			i = doc.offsetAt(tok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
+		}
+	}
+
+	if (forAutocompletion || tok == null) {
+		// auto completion or token not found - find it manually
+		for (; i >= 0; i--) {
+			const ch = line[i]
+			if (ch === ' ' || ch === '\t') {
+				if (key.length === 0)
+					continue
+				break
+			}
+			if (isValidIdChar(ch))
+				key = ch + key
 			else
 				break
 		}
+		if (!forAutocompletion) {
+			// search the rest of the key
+			const text = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 100))
+			for (let j = 0; j < text.length; j++) {
+				const ch = text[j]
+				if (isValidIdChar(ch))
+					key += ch
+				else
+					break
+			}
+		}
+		keyRange = Range.create(pos.line, i + 1, pos.line, i + 1 + key.length)
 	}
-	const keyRange = Range.create(pos.line, i + 1, pos.line, i + 1 + key.length)
 	// skip spaces
 	for (; i >= 0; i--) {
 		const ch = line[i]
 		if (ch !== ' ' && ch !== '\t')
 			break
 	}
-	const keyData: CallChain = { obj: key, objRange: keyRange }
+	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok }
 
 	let res: CallChain[] = [keyData]
 	while (i > 0) {
@@ -237,14 +257,22 @@ function getCallChain(txt: TextDocument, pos: Position, forAutocompletion: boole
 	return res
 }
 
-function getTokenAt(fileData: FixedValidationResult, name: string, position: Position, exactMatch = false): DasToken {
-	if (name.length === 0 || fileData.tokens.length === 0)
+function findTokenAtChain(fileData: FixedValidationResult, callChain: CallChain[], exactMatch = false): DasToken {
+	if (callChain.length === 0)
+		return null
+	return findTokenAt(fileData, callChain[callChain.length - 1], exactMatch)
+}
+
+function findTokenAt(fileData: FixedValidationResult, call: CallChain, exactMatch = false): DasToken {
+	if (call.token != null)
+		return call.token
+	if (call.obj.length === 0 || fileData.tokens.length === 0)
 		return null
 	let nearestPos = Position.create(0, 0)
 	let resToken: DasToken
 	for (let index = 0; index < fileData.tokens.length; index++) {
 		const t = fileData.tokens[index]
-		if (t.name === name && t._uri == fileData.uri && isPositionLess(t._range.start, position) && isPositionLess(nearestPos, t._range.start)) {
+		if (t.name === call.obj && t._uri == fileData.uri && isPositionLess(t._range.start, call.objRange.start) && isPositionLess(nearestPos, t._range.start)) {
 			nearestPos = t._range.start
 			resToken = t
 			continue
@@ -254,12 +282,16 @@ function getTokenAt(fileData: FixedValidationResult, name: string, position: Pos
 		return resToken
 	}
 	// maybe we have exact match somewhere
-	const exactName = fileData.tokens.find(t => t.name === name && t._uri != fileData.uri)
+	const exactName = fileData.tokens.find(t => t.name === call.obj && t._uri == fileData.uri)
 	if (exactName != null)
 		return exactName
 	if (exactMatch)
 		return null
 	// lets try to find any token in given range
+	return findTokenUnderCursor(fileData, rangeCenter(call.objRange))
+}
+
+function findTokenUnderCursor(fileData: FixedValidationResult, position: Position): DasToken {
 	const res: DasToken[] = []
 	for (const tok of fileData.tokens) {
 		if (tok._uri == fileData.uri && posInRange(position, tok._range)) {
@@ -277,49 +309,46 @@ function getTokenAt(fileData: FixedValidationResult, name: string, position: Pos
 
 connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
-	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	const res: CompletionItem[] = []
-	if (doc) {
-		const completionToken = getCallChain(doc, textDocumentPosition.position, /*forAutocompletion*/true)
-		console.log(JSON.stringify(completionToken))
-		let completionTdk: string = ""
-		if (completionToken.length > 1) {
-			// TODO: resolve all chain nodes
-			const objToken = completionToken[completionToken.length - 2]
-			const tok = getTokenAt(fileData, objToken.obj, rangeCenter(objToken.objRange), /*exact match*/true)
-			if (tok && tok.tdk.length > 0) {
-				completionTdk = tok.tdk
-				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
-				if (typeDeclData != null) {
-					typeDeclCompletion(typeDeclData, fileData.completion, res)
-				}
+	const completionToken = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
+	console.log(JSON.stringify(completionToken))
+	let completionTdk: string = ""
+	if (completionToken.length > 1) {
+		// TODO: resolve all chain nodes
+		const objToken = completionToken[completionToken.length - 2] // ignore last key (obj.key - we need obj)
+		const tok = findTokenAt(fileData, objToken, /*exact match*/true)
+		if (tok && tok.tdk.length > 0) {
+			completionTdk = tok.tdk
+			let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
+			if (typeDeclData != null) {
+				typeDeclCompletion(typeDeclData, fileData.completion, res)
 			}
 		}
-		else if (completionToken.length > 0) {
-			// probably enum
-			const enumData = fileData.completion.enums.find(e => e.name === completionToken[0].obj)
-			if (enumData != null) {
-				completionTdk = enumData.tdk
-				for (const ev of enumData.values) {
-					const c = CompletionItem.create(ev.name)
-					c.detail = enumValueDetail(ev)
-					c.documentation = enumValueDocs(ev, enumData)
-					c.kind = CompletionItemKind.EnumMember
-					res.push(c)
-				}
+	}
+	else if (completionToken.length > 0) {
+		// probably enum
+		const enumData = fileData.completion.enums.find(e => e.name === completionToken[0].obj)
+		if (enumData != null) {
+			completionTdk = enumData.tdk
+			for (const ev of enumData.values) {
+				const c = CompletionItem.create(ev.name)
+				c.detail = enumValueDetail(ev)
+				c.documentation = enumValueDocs(ev, enumData)
+				c.kind = CompletionItemKind.EnumMember
+				res.push(c)
 			}
 		}
-		if (completionTdk != "") {
-			// fill extension functions
-			for (const fn of fileData.completion.functions) {
-				// TODO: ignore const cases: Foo const == Foo
-				if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {
-					const c = CompletionItem.create(fn.name)
-					c.detail = funcDetail(fn)
-					c.documentation = funcDocs(fn)
-					c.kind = CompletionItemKind.Function
-					res.push(c)
-				}
+	}
+	if (completionTdk != "") {
+		// fill extension functions
+		for (const fn of fileData.completion.functions) {
+			// TODO: ignore const cases: Foo const == Foo
+			if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {
+				const c = CompletionItem.create(fn.name)
+				c.detail = funcDetail(fn)
+				c.documentation = funcDocs(fn)
+				c.kind = CompletionItemKind.Function
+				res.push(c)
 			}
 		}
 	}
@@ -330,10 +359,10 @@ connection.onHover(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return null
-	const doc = documents.get(textDocumentPosition.textDocument.uri)
-	const callChain = getCallChain(doc, textDocumentPosition.position, /*forAutocompletion*/false)
+	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/false)
+	console.log(JSON.stringify(callChain))
 	// TODO: resolve all chain nodes
-	const tok = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const tok = findTokenAtChain(fileData, callChain)
 	if (tok == null)
 		return null
 	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
@@ -396,11 +425,8 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const doc = documents.get(typeDefinitionParams.textDocument.uri)
-	if (!doc)
-		return null
-	const callChain = getCallChain(doc, typeDefinitionParams.position, /*forAutocompletion*/false)
-	const res = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const callChain = findCallChain(fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
+	const res = findTokenAtChain(fileData, callChain)
 	if (res == null)
 		return null
 
@@ -435,11 +461,8 @@ connection.onReferences(async (referencesParams) => {
 	const fileData = await getDocumentData(referencesParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const doc = documents.get(referencesParams.textDocument.uri)
-	if (!doc)
-		return null
-	const callChain = getCallChain(doc, referencesParams.position, /*forAutocompletion*/false)
-	const res = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const callChain = findCallChain(fileData, referencesParams.position, /*forAutocompletion*/false)
+	const res = findTokenAtChain(fileData, callChain)
 	if (res == null)
 		return null
 	console.log("references", referencesParams, res)
@@ -455,11 +478,8 @@ connection.onDefinition(async (declarationParams) => {
 	const fileData = await getDocumentData(declarationParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const doc = documents.get(declarationParams.textDocument.uri)
-	if (!doc)
-		return null
-	const callChain = getCallChain(doc, declarationParams.position, /*forAutocompletion*/false)
-	const res = callChain.length == 1 ? getTokenAt(fileData, callChain[0].obj, rangeCenter(callChain[0].objRange)) : null
+	const callChain = findCallChain(fileData, declarationParams.position, /*forAutocompletion*/false)
+	const res = findTokenAtChain(fileData, callChain)
 	if (res == null)
 		return null
 
@@ -991,6 +1011,14 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			}
 			fixedResults.tokens.push(token)
 			// TODO: add completion items for tokens
+			if (token.kind == 'ExprVar') {
+				addCompletionItem(map, {
+					label: token.name,
+					kind: CompletionItemKind.Variable,
+					detail: token.name,
+					documentation: describeToken(token),
+				})
+			}
 		}
 
 		for (const [_, items] of map.entries()) {
