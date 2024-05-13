@@ -29,6 +29,7 @@ struct ValidateConfig
     originalFile : string
     projectFile : string
     args : string
+    resultFile : string
     ignoreSharedModules : bool
     noGlobalVariables : bool
     noUnusedBlockArguments : bool
@@ -57,6 +58,7 @@ def main()
     config.originalFile = args |> arg_value("--original-file", config.file)
     config.projectFile = args |> arg_value("--project-file", "")
     config.args = args |> arg_value("--args", "")
+    config.resultFile = args |> arg_value("--result", "")
 
     config.ignoreSharedModules = args |> has_value("--ignore-shared-modules")
     config.noGlobalVariables = args |> has_value("--no-global-variables")
@@ -77,7 +79,8 @@ def main()
             f |> fwrite(textRes)
 
     if WRITE_RESULT
-        textRes |> print()
+        fopen(config.resultFile, "w") <| $(f)
+            f |> fwrite(textRes)
 
 
 struct DasError : CompletionAt

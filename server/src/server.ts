@@ -669,7 +669,6 @@ function stringHashCode(str: string) {
 }
 
 let validateId = 0
-let validateTempDir = null
 
 interface ValidatingProcess {
 	version: integer
@@ -716,18 +715,21 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 	const settings = await getDocumentSettings(textDocument.uri)
 
 	const filePath = URI.parse(textDocument.uri).fsPath
-	const tempFileName = `${stringHashCode(textDocument.uri).toString(16)}_${validateId.toString(16)}_${textDocument.version.toString(16)}_${path.basename(filePath)}`
+	const tempFilePrefix = `${stringHashCode(textDocument.uri).toString(16)}_${validateId.toString(16)}_${textDocument.version.toString(16)}`
+	const tempFileName = `${tempFilePrefix}_${path.basename(filePath)}`
+	const resultFileName = `${tempFileName}_res`
 	validateId++
-	if (validateTempDir == null)
-		validateTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'das_validate_'))
-	const tempFilePath = path.join(validateTempDir, tempFileName)
+	const tempFilePath = path.join(os.tmpdir(), tempFileName)
+	const resultFilePath = path.join(os.tmpdir(), resultFileName)
 	await fs.promises.writeFile(tempFilePath, textDocument.getText())
+	await fs.promises.writeFile(resultFilePath, '')
 
 	const args = settings.server.args.map(arg => arg.replace('${file}', 'validate_file.das'))
 	if (args.indexOf('--') < 0)
 		args.push('--')
 	args.push('--file', tempFilePath)
 	args.push('--original-file', filePath)
+	args.push('--result', resultFilePath)
 	args.push('--args', `"${settings.server.args.join(' ')}"`)
 	if (settings.project.file)
 		args.push('--project-file', settings.project.file)
@@ -758,12 +760,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 	vp.promise = new Promise<void>((resolve, reject) => {
 
-		let validateTextResult = ''
 		const diagnostics: Map<string, Diagnostic[]> = new Map()
 		diagnostics.set(textDocument.uri, [])
-		child.stdout.on('data', (data: any) => {
-			validateTextResult += data
-		})
 		child.stderr.on('data', (data: any) => {
 			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `${data}` })
 		})
@@ -772,8 +770,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			reject(error)
 		})
 		child.on('close', (exitCode: any) => {
-			console.log('remove temp file', tempFilePath)
+			const validateTextResult = fs.readFileSync(resultFilePath, 'utf8')
+			console.log('remove temp files', tempFilePath, resultFilePath)
 			fs.rmSync(tempFilePath)
+			fs.rmSync(resultFilePath)
 
 			if (documents.get(textDocument.uri)?.version !== fileVersion) {
 				console.log('document version changed, ignoring result', textDocument.uri)
