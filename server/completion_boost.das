@@ -240,6 +240,8 @@ struct CompletionTypeDecl : CompletionAt
     tdk1 : string
     tdk2 : string
 
+let skipTypeDescSize = [[auto[] Type none; Type autoinfer; Type fakeLineInfo; Type fakeContext; Type alias; Type anyArgument]]
+
 def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<TypeDecl>&) : int
     var foundIdx = res.typeDecls?[tdk] ?? -1
     if foundIdx >= 0
@@ -268,8 +270,9 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
     td.alias = t.alias |> string()
     for i in t.dim
         td.dim |> push(i)
-    td.sizeOf = t.sizeOf
-    td.alignOf = t.alignOf
+    if skipTypeDescSize |> find_index(t.baseType) == -1
+        td.sizeOf = t.sizeOf
+        td.alignOf = t.alignOf
     if t.enumType != null
         td.enumName = t.enumType.name |> string()
         td.mod = t.enumType._module != null ? t.enumType._module.name |> string() : ""
@@ -277,8 +280,6 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
         td.structName = t.structType.name |> string()
         td.mod = t.structType._module != null ? t.structType._module.name |> string() : ""
     if t.annotation != null
-        // td.alignOf = t.annotation.alignOf
-        // td.sizeOf = t.annotation.sizeOf
         td.structName = t.annotation.name |> string()
         td.mod = t.annotation._module != null ? t.annotation._module.name |> string() : ""
     if t.firstType != null
