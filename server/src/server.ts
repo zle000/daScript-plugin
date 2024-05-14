@@ -762,6 +762,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 		const diagnostics: Map<string, Diagnostic[]> = new Map()
 		diagnostics.set(textDocument.uri, [])
+		let output = ''
+		child.stdout.on('data', (data: any) => {
+			output += data
+		})
 		child.stderr.on('data', (data: any) => {
 			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `${data}` })
 		})
@@ -820,7 +824,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			if (exitCode !== 0 && diagnostics.get(textDocument.uri).length === 0) {
 				diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}, but no errors were reported. Please report this issue.` })
 				console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
-				console.log('"""', validateTextResult, '"""')
+				console.log('"""', output, '"""')
 			}
 			for (const [uri, diags] of diagnostics.entries()) {
 				connection.sendDiagnostics({ uri: uri, diagnostics: diags })

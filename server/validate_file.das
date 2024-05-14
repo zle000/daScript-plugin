@@ -76,15 +76,20 @@ def main()
         mkdir("results")
         let fileName = file_name_to_uri(config.originalFile) |> split("/") |> back()
         fopen("results/{fileName}.json", "w") <| $(f)
+            if f == null
+                error("unable to open file 'results/{fileName}.json'")
+                unsafe(fio::exit(1))
             f |> fwrite(textRes)
 
     if WRITE_RESULT
         fopen(config.resultFile, "w") <| $(f)
+            if f == null
+                error("unable to open file '{config.resultFile}'")
+                unsafe(fio::exit(1))
             f |> fwrite(textRes)
 
 
 struct DasError : CompletionAt
-    // _range : Range
     what : string
     extra : string
     fixme : string
