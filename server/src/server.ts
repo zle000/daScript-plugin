@@ -122,7 +122,7 @@ connection.onInitialize((params) => {
 interface CallChain {
 	obj: string
 	objRange: Range
-	token?: DasToken
+	token?: DasToken // use findTokenAtChain to resolve tokens
 }
 
 function findCallChain(fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
@@ -292,18 +292,13 @@ function findTokenAt(fileData: FixedValidationResult, call: CallChain, exactMatc
 }
 
 function findTokenUnderCursor(fileData: FixedValidationResult, position: Position): DasToken {
-	const res: DasToken[] = []
+	let res: DasToken = null
 	for (const tok of fileData.tokens) {
-		if (tok._uri == fileData.uri && posInRange(position, tok._range)) {
-			res.push(tok)
+		if (tok._uri == fileData.uri && posInRange(position, tok._range) && (res == null || isRangeLess(tok._range, res._range))) {
+			res = tok
 		}
 	}
-	if (res.length === 0)
-		return null
-	res.sort((a, b) => {
-		return isRangeLess(a._range, b._range) ? -1 : 1
-	})
-	return res[0]
+	return res
 }
 
 
@@ -804,11 +799,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 					const diag: Diagnostic = { range: error._range, message: error.what, code: error.cerr, severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning }
 					if (error.extra?.length > 0 || error.fixme?.length > 0) {
-						let extra = error.extra || ''
-						if (error.fixme?.length > 0)
-							extra += extra.length > 0 ? `\n${error.fixme}` : error.fixme
-						const lines = extra.split('\n')
 						const info: DiagnosticRelatedInformation[] = []
+						let lines: string[] = []
+						if (error.extra?.length > 0)
+							lines = error.extra.split('\n')
+						if (error.fixme?.length > 0)
+							lines = lines.concat(error.fixme.split('\n'))
 						for (const line of lines) {
 							if (line.trim().length !== 0)
 								info.push({ location: { uri: error._uri, range: error._range }, message: line })

@@ -23,7 +23,7 @@ struct CompletionResult
     enums : array<CompletionEnum>
     structs : array<CompletionStruct>
     typeDecls : array<CompletionTypeDecl>
-    typeDefs : array<CompletionTypeDef>
+    typeDefs : array<CompletionTypeDef> // aliases, typedef Foo = int
     globals : array<CompletionGlobal>
     functions : array<CompletionFunction>
 

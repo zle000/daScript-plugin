@@ -435,7 +435,7 @@ export interface CompletionResult {
     enums: CompletionEnum[]
     structs: CompletionStruct[]
     typeDecls: CompletionTypeDecl[]
-    typeDefs: CompletionTypeDef[]
+    typeDefs: CompletionTypeDef[] // aliases, typedef Foo = int
     globals: CompletionGlobal[]
     functions: CompletionFunction[]
 }
