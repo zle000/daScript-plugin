@@ -15,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -122,7 +122,8 @@ connection.onInitialize((params) => {
 interface CallChain {
 	obj: string
 	objRange: Range
-	token?: DasToken // use findTokenAtChain to resolve tokens
+	token?: DasToken
+	tdk: string
 }
 
 function findCallChain(fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
@@ -138,11 +139,16 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 	let tok: DasToken = null
 	if (!forAutocompletion) {
 		// lets try to find token under cursor
-		tok = findTokenUnderCursor(fileData, pos)
-		if (tok != null) {
-			key = tok.name
-			keyRange = tok._range
-			i = doc.offsetAt(tok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
+		const cursorTok = findTokenUnderCursor(fileData, pos)
+		if (cursorTok != null) {
+			const currentText = doc.getText(cursorTok._range)
+			// check if token name is in the current text
+			if (cursorTok.name.indexOf(currentText) >= 0 || currentText.indexOf(cursorTok.name) >= 0) {
+				tok = cursorTok
+				key = tok.name
+				keyRange = tok._range
+				i = doc.offsetAt(tok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
+			}
 		}
 	}
 
@@ -179,7 +185,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		if (ch !== ' ' && ch !== '\t')
 			break
 	}
-	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok }
+	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok, tdk: tok ? tok.tdk : "" }
 
 	let res: CallChain[] = [keyData]
 	while (i > 0) {
@@ -251,16 +257,68 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		}
 		if (obj.length === 0) { break }
 		const objRange = Range.create(pos.line, i + 1, pos.line, i + 1 + obj.length)
-		res.unshift({ obj: obj, objRange: objRange })
+		res.unshift({ obj: obj, objRange: objRange, tdk: "" })
 	}
 
+	resolveChainTdk(fileData, res, !forAutocompletion)
 	return res
 }
 
-function findTokenAtChain(fileData: FixedValidationResult, callChain: CallChain[], exactMatch = false): DasToken {
+function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[], forAutocompletion: boolean): void {
 	if (callChain.length === 0)
-		return null
-	return findTokenAt(fileData, callChain[callChain.length - 1], exactMatch)
+		return
+	const last = callChain[callChain.length - 1]
+	if (!forAutocompletion && last.token != null) {
+		return
+	}
+
+	let prevTdk: string = ""
+
+	let head = callChain[0]
+	const tok = head.token ? head.token : findTokenAt(fileData, head, /*exact match*/true)
+	if (tok != null) {
+		head.token = tok
+		head.tdk = tok.tdk
+		prevTdk = tok.tdk
+	}
+	else
+	{
+		// unable to resolve first token, no way to resolve others
+		return
+	}
+
+	var idx = 1
+	while (idx < callChain.length) {
+		const call = callChain[idx]
+		idx++
+		// maybe already exists token
+		if (call.token != null) {
+			call.tdk = call.token.tdk
+			prevTdk = call.tdk
+			continue
+		}
+		if (prevTdk.length > 0) {
+			// resolve tdk for type decls
+			let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
+			if (typeDeclData != null) {
+				const nextTdk = typeDeclItemTdk(typeDeclData, fileData.completion, call.obj)
+				if (nextTdk.length > 0) {
+					call.tdk = nextTdk
+					prevTdk = nextTdk
+					continue
+				}
+			}
+		}
+		// maybe enum
+		const enumData = fileData.completion.enums.find(e => e.name === call.obj)
+		if (enumData != null) {
+			call.tdk = enumData.tdk
+			prevTdk = enumData.tdk
+			continue
+		}
+		// failed to resolve tdk
+		break
+	}
 }
 
 function findTokenAt(fileData: FixedValidationResult, call: CallChain, exactMatch = false): DasToken {
@@ -272,6 +330,9 @@ function findTokenAt(fileData: FixedValidationResult, call: CallChain, exactMatc
 	let resToken: DasToken
 	for (let index = 0; index < fileData.tokens.length; index++) {
 		const t = fileData.tokens[index]
+		// ignore fields, we need only top level tokens
+		if (t.kind == 'ExprField')
+			continue
 		if (t.name === call.obj && t._uri == fileData.uri && isPositionLess(t._range.start, call.objRange.start) && isPositionLess(nearestPos, t._range.start)) {
 			nearestPos = t._range.start
 			resToken = t
@@ -301,40 +362,20 @@ function findTokenUnderCursor(fileData: FixedValidationResult, position: Positio
 	return res
 }
 
-
 connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	const res: CompletionItem[] = []
-	const completionToken = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
-	// console.log(JSON.stringify(completionToken))
-	let completionTdk: string = ""
-	if (completionToken.length > 1) {
-		// TODO: resolve all chain nodes
-		const objToken = completionToken[completionToken.length - 2] // ignore last key (obj.key - we need obj)
-		const tok = findTokenAt(fileData, objToken, /*exact match*/true)
-		if (tok && tok.tdk.length > 0) {
-			completionTdk = tok.tdk
-			let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
-			if (typeDeclData != null) {
-				typeDeclCompletion(typeDeclData, fileData.completion, res)
-			}
+	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
+	if (callChain.length === 0)
+		return res
+	const objToken = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
+	const completionTdk = objToken.token ? objToken.token.tdk : objToken.tdk
+	if (completionTdk.length > 0) {
+		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
+		if (typeDeclData != null) {
+			typeDeclCompletion(typeDeclData, fileData.completion, res)
 		}
-	}
-	else if (completionToken.length > 0) {
-		// probably enum
-		const enumData = fileData.completion.enums.find(e => e.name === completionToken[0].obj)
-		if (enumData != null) {
-			completionTdk = enumData.tdk
-			for (const ev of enumData.values) {
-				const c = CompletionItem.create(ev.name)
-				c.detail = enumValueDetail(ev)
-				c.documentation = enumValueDocs(ev, enumData)
-				c.kind = CompletionItemKind.EnumMember
-				res.push(c)
-			}
-		}
-	}
-	if (completionTdk != "") {
+
 		// fill extension functions
 		for (const fn of fileData.completion.functions) {
 			// TODO: ignore const cases: Foo const == Foo
@@ -355,65 +396,77 @@ connection.onHover(async (textDocumentPosition) => {
 	if (!fileData)
 		return null
 	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/false)
-	// console.log(JSON.stringify(callChain))
-	// TODO: resolve all chain nodes
-	const tok = findTokenAtChain(fileData, callChain)
-	if (tok == null)
+	if (callChain.length === 0)
 		return null
-	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
+	// console.log(JSON.stringify(callChain))
+	const last = callChain[callChain.length - 1]
+	const tok = last.token
+	if (tok != null) {
+		const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
 
-	let res = ""
-	let first = true
-	if (!first)
-		res += "\n\n"
-	first = false
-	res += describeToken(tok)
-	if (settings.hovers.verbose) {
-		//
-	}
-	if (settings.experimental) {
-		res += `\n// ${tok.kind}`
-	}
+		let res = ""
+		let first = true
+		if (!first)
+			res += "\n\n"
+		first = false
+		res += describeToken(tok)
+		if (settings.hovers.verbose) {
+			//
+		}
+		if (settings.experimental) {
+			res += `\n// ${tok.kind}`
+		}
 
-	if (tok.kind == 'field') {
-		res += `\n//^ ${tok.parentTdk}`
-	}
+		if (tok.kind == 'field') {
+			res += `\n//^ ${tok.parentTdk}`
+		}
 
-	if (tok.kind == 'ExprCall' /* || tok.kind == 'func' */) {
-		const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
-		if (func != null && func.cpp.length > 0)
-			res += `\n[::${func.cpp}(...)]`
+		if (tok.kind == 'ExprCall' /* || tok.kind == 'func' */) {
+			const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
+			if (func != null && func.cpp.length > 0)
+				res += `\n[::${func.cpp}(...)]`
+		}
+		else if (tok.tdk.length > 0) {
+			const showBaseType = tok.kind != 'ExprAddr'
+			for (const td of fileData.completion.typeDecls) {
+				if (td.tdk === tok.tdk) {
+					if (showBaseType && !primitiveBaseType(td, fileData.completion))
+						res += `\n${typeDeclDocs(td, fileData.completion)}`
+					const pos = typeDeclDefinition(td, fileData.completion)
+					if (pos._uri?.length > 0)
+						res += `\n//@@${pos._uri}`
+					if (!isRangeZeroEmpty(pos._range))
+						res += `\n//@@${JSON.stringify(pos._range)}`
+					break
+				}
+			}
+		}
+		if (settings.hovers.verbose) {
+			if (tok.declAt._uri?.length > 0)
+				res += `\n//@${tok.declAt._uri}`
+			if (!isRangeZeroEmpty(tok.declAt._range))
+				res += `\n//@${JSON.stringify(tok.declAt._range)}`
+		}
+		if (settings.experimental) {
+			if (tok._uri?.length > 0)
+				res += `\n//${tok._uri}`
+			res += `\n//${JSON.stringify(tok._range)}`
+		}
+		return {
+			contents: { kind: 'markdown', value: "```dascript\n" + res + "\n```" },
+			range: tok._range,
+		}
 	}
-	else if (tok.tdk.length > 0) {
-		const showBaseType = tok.kind != 'ExprAddr'
+	const tdk = last.tdk
+	if (tdk.length > 0) {
 		for (const td of fileData.completion.typeDecls) {
-			if (td.tdk === tok.tdk) {
-				if (showBaseType && !primitiveBaseType(td, fileData.completion))
-					res += `\n${typeDeclDocs(td, fileData.completion)}`
-				const pos = typeDeclDefinition(td, fileData.completion)
-				if (pos._uri?.length > 0)
-					res += `\n//@@${pos._uri}`
-				if (!isRangeZeroEmpty(pos._range))
-					res += `\n//@@${JSON.stringify(pos._range)}`
-				break
+			if (td.tdk === tdk) {
+				const res = typeDeclDocs(td, fileData.completion)
+				return { contents: { kind: 'markdown', value: "```dascript\n" + `${last.obj}\n${res}` + "\n```" } }
 			}
 		}
 	}
-	if (settings.hovers.verbose) {
-		if (tok.declAt._uri?.length > 0)
-			res += `\n//@${tok.declAt._uri}`
-		if (!isRangeZeroEmpty(tok.declAt._range))
-			res += `\n//@${JSON.stringify(tok.declAt._range)}`
-	}
-	if (settings.experimental) {
-		if (tok._uri?.length > 0)
-			res += `\n//${tok._uri}`
-		res += `\n//${JSON.stringify(tok._range)}`
-	}
-	return {
-		contents: { kind: 'markdown', value: "```dascript\n" + res + "\n```" },
-		range: tok._range,
-	}
+	return null
 })
 
 connection.onTypeDefinition(async (typeDefinitionParams) => {
@@ -421,16 +474,14 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	if (!fileData)
 		return null
 	const callChain = findCallChain(fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
-	const res = findTokenAtChain(fileData, callChain)
-	if (res == null)
+	if (callChain.length === 0)
 		return null
+	const last = callChain[callChain.length - 1]
+	const resTdk = last.token ? last.token.tdk : last.tdk
 
-	// if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
-	// 	return Location.create(res.declAt._uri, res.declAt._range)
-
-	if (res.tdk.length > 0) {
+	if (resTdk.length > 0) {
 		for (const td of fileData.completion.typeDecls) {
-			if (td.tdk === res.tdk) {
+			if (td.tdk === resTdk) {
 				const pos = typeDeclDefinition(td, fileData.completion)
 				if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
 					return Location.create(pos._uri, pos._range)
@@ -439,13 +490,19 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 		}
 	}
 
-	if (res.kind == "struct" || res.kind == "handle") {
-		// it's fast :)
-		const st = fileData.completion.structs.find(st => st.name === res.name && st.mod === res.mod)
-		if (st != null) {
-			const st2 = getParentStruct(st, fileData.completion)
-			if (st2 != null && st2._uri.length > 0 && !isRangeZeroEmpty(st2._range)) {
-				return Location.create(st2._uri, st2._range)
+	const res = last.token
+	if (res != null) {
+		// if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
+		// 	return Location.create(res.declAt._uri, res.declAt._range)		
+
+		if (res.kind == "struct" || res.kind == "handle") {
+			// it's fast :)
+			const st = fileData.completion.structs.find(st => st.name === res.name && st.mod === res.mod)
+			if (st != null) {
+				const st2 = getParentStruct(st, fileData.completion)
+				if (st2 != null && st2._uri.length > 0 && !isRangeZeroEmpty(st2._range)) {
+					return Location.create(st2._uri, st2._range)
+				}
 			}
 		}
 	}
@@ -457,10 +514,10 @@ connection.onReferences(async (referencesParams) => {
 	if (!fileData)
 		return null
 	const callChain = findCallChain(fileData, referencesParams.position, /*forAutocompletion*/false)
-	const res = findTokenAtChain(fileData, callChain)
-	if (res == null)
+	if (callChain.length === 0)
 		return null
-	console.log("references", referencesParams, res)
+	const last = callChain[callChain.length - 1]
+	const res = last.token
 	// NOTE:! take in count declAt
 	return null
 })
@@ -474,58 +531,60 @@ connection.onDefinition(async (declarationParams) => {
 	if (!fileData)
 		return null
 	const callChain = findCallChain(fileData, declarationParams.position, /*forAutocompletion*/false)
-	const res = findTokenAtChain(fileData, callChain)
-	if (res == null)
+	if (callChain.length === 0)
 		return null
+	const last = callChain[callChain.length - 1]
+	const res = last.token
+	if (res != null) {
+		if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
+			return Location.create(res.declAt._uri, res.declAt._range)
 
-	if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
-		return Location.create(res.declAt._uri, res.declAt._range)
-
-	if (res.kind == 'ExprAddr') {
-		// function call
-		const func = fileData.completion.functions.find(f => f.name === res.name && f.mod === res.mod)
-		if (func != null && func.decl._uri.length > 0 && !isRangeZeroEmpty(func.decl._range))
-			return Location.create(func._uri, func._range)
-	}
-	if (res.kind == "typedecl") {
-		for (const td of fileData.completion.typeDecls) {
-			if (td.tdk === res.tdk) {
-				const pos = typeDeclDefinition(td, fileData.completion)
-				if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
-					return Location.create(pos._uri, pos._range)
+		if (res.kind == 'ExprAddr') {
+			// function call
+			const func = fileData.completion.functions.find(f => f.name === res.name && f.mod === res.mod)
+			if (func != null && func.decl._uri.length > 0 && !isRangeZeroEmpty(func.decl._range))
+				return Location.create(func._uri, func._range)
+		}
+		if (res.kind == "typedecl") {
+			for (const td of fileData.completion.typeDecls) {
+				if (td.tdk === res.tdk) {
+					const pos = typeDeclDefinition(td, fileData.completion)
+					if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
+						return Location.create(pos._uri, pos._range)
+					}
+					break
 				}
-				break
 			}
+		}
+
+		if (res.kind == "ExprGoto") {
+			// TODO: search label with same name
+			// name === goto label 0 -> label 0
+		}
+
+		if (res.kind == "struct" || res.kind == "handle") {
+			const childStructs: Location[] = []
+			for (const st of fileData.completion.structs) {
+				if (st.parentName === res.name && st.parentMod === res.mod && st._uri.length > 0 && !isRangeZeroEmpty(st._range)) {
+					childStructs.push(Location.create(st._uri, st._range))
+				}
+			}
+			if (childStructs.length > 0)
+				return childStructs
 		}
 	}
 
-	if (res.parentTdk.length > 0) {
+	const parentTdk = res && res.parentTdk.length > 0 ? res.parentTdk : callChain.length > 1 ? callChain[callChain.length - 2].tdk : ""
+	if (parentTdk.length > 0) {
 		for (const td of fileData.completion.typeDecls) {
-			if (td.tdk === res.parentTdk) {
+			if (td.tdk === parentTdk) {
 				// TODO: find pos for field tdk.name
 				const pos = typeDeclDefinition(td, fileData.completion)
 				if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
 					return Location.create(pos._uri, pos._range)
 				}
-				break
 			}
 		}
-	}
-
-	if (res.kind == "ExprGoto") {
-		// TODO: search label with same name
-		// name === goto label 0 -> label 0
-	}
-
-	if (res.kind == "struct" || res.kind == "handle") {
-		const childStructs: Location[] = []
-		for (const st of fileData.completion.structs) {
-			if (st.parentName === res.name && st.parentMod === res.mod && st._uri.length > 0 && !isRangeZeroEmpty(st._range)) {
-				childStructs.push(Location.create(st._uri, st._range))
-			}
-		}
-		if (childStructs.length > 0)
-			return childStructs
 	}
 	return null
 })
