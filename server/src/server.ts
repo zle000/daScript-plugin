@@ -15,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, DasToken, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -119,11 +119,14 @@ connection.onInitialize((params) => {
 	}
 })
 
+
 interface CallChain {
 	obj: string
 	objRange: Range
 	token?: DasToken
 	tdk: string
+	delimiter: Delimiter
+	brackets: Brackets
 }
 
 function findCallChain(fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
@@ -137,6 +140,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 	let keyRange: Range
 	let i = line.length - 1
 	let tok: DasToken = null
+	let del = Delimiter.None
 	if (!forAutocompletion) {
 		// lets try to find token under cursor
 		const cursorTok = findTokenUnderCursor(fileData, pos)
@@ -157,6 +161,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		for (; i >= 0; i--) {
 			const ch = line[i]
 			if (ch === ' ' || ch === '\t') {
+				del = Delimiter.Space
 				if (key.length === 0)
 					continue
 				break
@@ -179,71 +184,101 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		}
 		keyRange = Range.create(pos.line, i + 1, pos.line, i + 1 + key.length)
 	}
-	// skip spaces
-	for (; i >= 0; i--) {
-		const ch = line[i]
-		if (ch !== ' ' && ch !== '\t')
-			break
-	}
-	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok, tdk: tok ? tok.tdk : "" }
 
-	let res: CallChain[] = [keyData]
-	while (i > 0) {
-		// '.' '?.' '->' 'as' 'is' '?as' '|>'
-		const hasDot = i >= 0 && line[i] === '.'
-		const hasMaybeDot = i > 0 && line[i] === '.' && line[i - 1] === '?'
-		const hasArrow = i > 0 && line[i] === '>' && line[i - 1] === '-'
-		const hasAs = i > 0 && line[i] === 's' && line[i - 1] === 'a'
-		const hasIs = i > 0 && line[i] === 's' && line[i - 1] === 'i'
-		const hasMaybeAs = i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?'
-		const hasPipe = i > 0 && line[i] === '>' && line[i - 1] === '|'
-		if (!hasDot && !hasMaybeDot && !hasArrow && !hasAs && !hasIs && !hasMaybeAs && !hasPipe) {
-			break
-		}
-		--i // ignore dot or space
-		if (hasArrow || hasMaybeDot || hasAs || hasIs || hasMaybeAs || hasPipe) {
-			--i
-		}
-		if (hasMaybeAs) {
-			--i
-		}
+	if (del === Delimiter.Space && (key == "as" || key == "is" || key == "?as")) {
+		// skip 'as' 'is' '?as' in case when space is delimiter
+		// `foo as |` - converts to ["foo", ""], not to ["foo", "as"]
+		key = ""
+		keyRange = Range.create(pos.line, i + 1 + key.length, pos.line, i + 1 + key.length)
+	}
+	else {
 		// skip spaces
 		for (; i >= 0; i--) {
 			const ch = line[i]
 			if (ch !== ' ' && ch !== '\t')
 				break
 		}
+	}
+	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok, tdk: tok ? tok.tdk : "", delimiter: del, brackets: Brackets.None }
 
-		let afterBracket = i >= 0 && (line[i] === ']' || line[i] === ')')
-		if (afterBracket) {
-			let numO = 0 // ( )
-			let numE = 0 // { }
-			let numD = 0 // [ ]
-			for (; i >= 0; i--) {
-				const ch = line[i]
-				if (ch === ')')
-					numO++
-				else if (ch === '(')
-					numO--
-				else if (ch === ']')
-					numD++
-				else if (ch === '[')
-					numD--
-				else if (ch === '}')
-					numE++
-				else if (ch === '{')
-					numE--
-				if ((ch == '(' || ch == '[' || ch == '{') && numO == 0 && numE == 0 && numD == 0) {
-					i-- // skip last bracket
-					break
+	let res: CallChain[] = [keyData]
+	while (i > 0) {
+		del = Delimiter.None
+		// '.' ' ' '?.' '->' 'as' 'is' '?as' '|>'
+
+		if (line[i] === '.') {
+			i -= 1
+			del = Delimiter.Dot
+		}
+		else if (line[i] === ' ') {
+			i -= 1
+			del = Delimiter.Space
+		}
+		else if (i > 0 && line[i] === '.' && line[i - 1] === '?') {
+			i -= 2
+			del = Delimiter.QuestionDot
+		}
+		else if (i > 0 && line[i] === '>' && line[i - 1] === '-') {
+			i -= 2
+			del = Delimiter.Arrow
+		}
+		else if (i > 0 && line[i] === 's' && line[i - 1] === 'a') {
+			i -= 2
+			del = Delimiter.As
+		}
+		else if (i > 0 && line[i] === 's' && line[i - 1] === 'i') {
+			i -= 2
+			del = Delimiter.Is
+		}
+		else if (i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?') {
+			i -= 3
+			del = Delimiter.QuestionAs
+		}
+		else if (i > 0 && line[i] === '>' && line[i - 1] === '|') {
+			i -= 2
+			del = Delimiter.Pipe
+		}
+		if (del === Delimiter.None)
+			break
+		// skip spaces
+		for (; i >= 0; i--) {
+			const ch = line[i]
+			if (ch !== ' ' && ch !== '\t')
+				break
+		}
+		let brackets = Brackets.None
+		if (i >= 0) {
+			brackets = line[i] === ')' ? Brackets.Round : line[i] === ']' ? Brackets.Square : Brackets.None
+			if (brackets !== Brackets.None) {
+				let numO = 0 // ( )
+				let numE = 0 // { }
+				let numD = 0 // [ ]
+				for (; i >= 0; i--) {
+					const ch = line[i]
+					if (ch === ')')
+						numO++
+					else if (ch === '(')
+						numO--
+					else if (ch === ']')
+						numD++
+					else if (ch === '[')
+						numD--
+					else if (ch === '}')
+						numE++
+					else if (ch === '{')
+						numE--
+					if ((ch == '(' || ch == '[' || ch == '{') && numO == 0 && numE == 0 && numD == 0) {
+						i-- // skip last bracket
+						break
+					}
 				}
-			}
 
-			// skip spaces
-			for (; i >= 0; i--) {
-				const ch = line[i]
-				if (ch !== ' ' && ch !== '\t')
-					break
+				// skip spaces
+				for (; i >= 0; i--) {
+					const ch = line[i]
+					if (ch !== ' ' && ch !== '\t')
+						break
+				}
 			}
 		}
 
@@ -257,7 +292,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		}
 		if (obj.length === 0) { break }
 		const objRange = Range.create(pos.line, i + 1, pos.line, i + 1 + obj.length)
-		res.unshift({ obj: obj, objRange: objRange, tdk: "" })
+		res.unshift({ obj: obj, objRange: objRange, tdk: "", delimiter: del, brackets: brackets })
 	}
 
 	resolveChainTdk(fileData, res, !forAutocompletion)
@@ -273,21 +308,7 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 	}
 
 	let prevTdk: string = ""
-
-	let head = callChain[0]
-	const tok = head.token ? head.token : findTokenAt(fileData, head, /*exact match*/true)
-	if (tok != null) {
-		head.token = tok
-		head.tdk = tok.tdk
-		prevTdk = tok.tdk
-	}
-	else
-	{
-		// unable to resolve first token, no way to resolve others
-		return
-	}
-
-	var idx = 1
+	var idx = 0
 	while (idx < callChain.length) {
 		const call = callChain[idx]
 		idx++
@@ -297,7 +318,7 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			prevTdk = call.tdk
 			continue
 		}
-		if (prevTdk.length > 0) {
+		if (prevTdk.length > 0 && call.obj.length > 0) {
 			// resolve tdk for type decls
 			let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
 			if (typeDeclData != null) {
@@ -309,12 +330,24 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 				}
 			}
 		}
-		// maybe enum
-		const enumData = fileData.completion.enums.find(e => e.name === call.obj)
-		if (enumData != null) {
-			call.tdk = enumData.tdk
-			prevTdk = enumData.tdk
-			continue
+		if (idx == 1) {
+			const tok = call.token ? call.token : findTokenAt(fileData, call, /*exact match*/true)
+			if (tok != null) {
+				call.token = tok
+				call.tdk = tok.tdk
+				prevTdk = tok.tdk
+				continue
+			}
+		}
+		if (call.delimiter == Delimiter.Space && call.obj.length > 0) {
+			// maybe enum
+			// TODO: add bitfields here too
+			const enumData = fileData.completion.enums.find(e => e.name === call.obj)
+			if (enumData != null) {
+				call.tdk = enumData.tdk
+				prevTdk = enumData.tdk
+				continue
+			}
 		}
 		// failed to resolve tdk
 		break
@@ -368,23 +401,28 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	if (callChain.length === 0)
 		return res
-	const objToken = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
-	const completionTdk = objToken.token ? objToken.token.tdk : objToken.tdk
+	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
+	let completionTdk = call.token ? call.token.tdk : call.tdk
 	if (completionTdk.length > 0) {
 		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
 		if (typeDeclData != null) {
-			typeDeclCompletion(typeDeclData, fileData.completion, res)
+			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
+			if (resTd.tdk.length > 0)
+				completionTdk = resTd.tdk
 		}
 
-		// fill extension functions
-		for (const fn of fileData.completion.functions) {
-			// TODO: ignore const cases: Foo const == Foo
-			if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {
-				const c = CompletionItem.create(fn.name)
-				c.detail = funcDetail(fn)
-				c.documentation = funcDocs(fn)
-				c.kind = CompletionItemKind.Function
-				res.push(c)
+		if (call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe) {
+			// fill extension functions
+			for (const fn of fileData.completion.functions) {
+				// TODO: ignore const cases: Foo const == Foo
+				// TODO: convert dot to pipe
+				if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {
+					const c = CompletionItem.create(fn.name)
+					c.detail = funcDetail(fn)
+					c.documentation = funcDocs(fn)
+					c.kind = CompletionItemKind.Function
+					res.push(c)
+				}
 			}
 		}
 	}

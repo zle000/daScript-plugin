@@ -310,11 +310,14 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
 }
 
 
-export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, res: CompletionItem[]): void {
+// returns actual tdk name
+export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
+    let resultTd = td
     if (td.baseType === 'structure' || td.baseType === 'handle') {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st) {
             st.fields.forEach(f => {
+                // TODO: show fields only when delimiter is dot, show functions only when delimiter is arrow or auto transform completion text
                 const c = CompletionItem.create(f.name)
                 c.kind = CompletionItemKind.Field
                 c.detail = structFieldDetail(f)
@@ -348,18 +351,18 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}`)
     // }
     // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
-    if ((td.baseType === 'pointer' || td.baseType === 'array') && td.tdk1.length > 0) {
+    if ((td.baseType === 'pointer' || (td.baseType === 'array' && brackets == Brackets.Square)) && td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
-            typeDeclCompletion(td1, cr, res)
+            resultTd = typeDeclCompletion(td1, cr, delimiter, brackets, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
     // table with empty tdk2 is unspecified table
-    if (td.baseType === 'table' && td.tdk1.length > 0) {
+    if (td.baseType === 'table' && brackets == Brackets.Square && td.tdk1.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
-            typeDeclCompletion(td2, cr, res)
+            resultTd = typeDeclCompletion(td2, cr, delimiter, brackets, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
@@ -371,6 +374,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
         c.documentation = typeDeclFieldDocs(f, td)
         res.push(c)
     })
+    return resultTd
 }
 
 
@@ -591,4 +595,22 @@ export function isPositionLessOrEqual(a: Position, b: Position) {
     if (a.line > b.line)
         return false
     return a.character <= b.character
+}
+
+export enum Delimiter {
+    None = '',
+    Space = ' ',
+    Dot = '.',
+    Arrow = '->',
+    QuestionDot = '?.',
+    As = 'as',
+    Is = 'is',
+    QuestionAs = '?as',
+    Pipe = '|>',
+}
+
+export enum Brackets {
+    None = 0,
+    Round = 1,
+    Square = 2,
 }
