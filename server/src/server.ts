@@ -528,14 +528,16 @@ connection.onHover(async (textDocumentPosition) => {
 		}
 
 	}
-	for (const tdk of last.tdks) {
-		for (const td of fileData.completion.typeDecls) {
-			if (td.tdk === tdk) {
-				const doc = typeDeclDocs(td, fileData.completion)
-				if (!first)
-					res += '\n'
-				first = false
-				res += `\n${last.obj}\n${doc}`
+	if (res.length == 0) {
+		for (const tdk of last.tdks) {
+			for (const td of fileData.completion.typeDecls) {
+				if (td.tdk === tdk) {
+					const doc = typeDeclDocs(td, fileData.completion)
+					if (!first)
+						res += '\n'
+					first = false
+					res += `\n${last.obj}\n${doc}`
+				}
 			}
 		}
 	}
