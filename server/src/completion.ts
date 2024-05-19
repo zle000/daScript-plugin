@@ -416,24 +416,22 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
 }
 
 
-export function typeDeclItemTdk(td: CompletionTypeDecl, cr: CompletionResult, name: string): string {
-    let res = ''
+export function typeDeclItemTdk(td: CompletionTypeDecl, cr: CompletionResult, name: string): string[] {
+    let res: string[] = []
     typeDeclIter(td, cr, function (td, st, en) {
-        if (res.length > 0)
-            return
         if (st) {
             for (const f of st.fields) {
                 if (f.name === name) {
-                    res = f.tdk
-                    return
+                    res.push(f.tdk)
+                    break
                 }
             }
         }
         if (en) {
             for (const v of en.values) {
                 if (v.name === name) {
-                    res = td.tdk
-                    return
+                    res.push(td.tdk)
+                    break
                 }
             }
         }
@@ -444,9 +442,9 @@ export function typeDeclItemTdk(td: CompletionTypeDecl, cr: CompletionResult, na
     // return td
     for (const f of td.fields) {
         if (f.name === name)
-            return f.tdk
+            return [f.tdk]
     }
-    return '' // not found
+    return res // not found
 }
 
 
@@ -524,7 +522,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     ) {
         let dim = td.baseType.endsWith('2') ? 2 : td.baseType.endsWith('3') ? 3 : 4
         let type = td.baseType.startsWith('f') ? 'float' : td.baseType.startsWith('u') ? 'uint' : 'int'
-        const fieldsStr = "xyzw"
+        const fieldsStr = 'xyzw'
         for (let i = 0; i < dim; i++) {
             const c = CompletionItem.create(fieldsStr.charAt(i))
             c.kind = CompletionItemKind.Field
@@ -672,6 +670,11 @@ export function isRangeLess(a: Range, b: Range) {
     return (lenA2 < lenB2)
 }
 
+export function isRangeEqual(a : Range, b : Range)
+{
+    return isPositionEqual(a.start, b.start) && isPositionEqual(a.end, b.end)
+}
+
 export function isRangeZeroEmpty(a: Range) {
     return (a.start.line === 0 && a.start.character === 0 && a.end.line === 0 && a.end.character === 0)
 }
@@ -690,6 +693,11 @@ export function isPositionLessOrEqual(a: Position, b: Position) {
     if (a.line > b.line)
         return false
     return a.character <= b.character
+}
+
+export function isPositionEqual(a : Position, b : Position)
+{
+    return a.line == b.line && a.character == b.character
 }
 
 export enum Delimiter {
