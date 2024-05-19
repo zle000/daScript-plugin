@@ -328,7 +328,7 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			continue
 		}
 		if (idx == 1) {
-			const toks = call.tokens.length > 0 ? call.tokens : findTokensAt(fileData, call, /*exact match*/true)
+			const toks = call.tokens.length > 0 ? call.tokens : findTokensAt(fileData, call)
 			if (toks.length > 0) {
 				call.tokens = toks
 				call.tdks = new Set(toks.map(it => it.tdk))
@@ -379,15 +379,12 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 	}
 }
 
-function findTokensAt(fileData: FixedValidationResult, call: CallChain, exactMatch = false): DasToken[] {
-	if (call.tokens.length > 0)
-		return call.tokens
+function findTokensAt(fileData: FixedValidationResult, call: CallChain): DasToken[] {
 	if (call.obj.length === 0 || fileData.tokens.length === 0)
 		return []
 	let nearestPos = Position.create(0, 0)
 	let nearestToken: DasToken = null
-	for (let index = 0; index < fileData.tokens.length; index++) {
-		const t = fileData.tokens[index]
+	for (const t of fileData.tokens) {
 		// ignore fields, we need only top level tokens
 		if (t.kind == TokenKind.ExprField)
 			continue
@@ -399,8 +396,7 @@ function findTokensAt(fileData: FixedValidationResult, call: CallChain, exactMat
 	}
 	if (nearestToken != null) {
 		var res: DasToken[] = [nearestToken]
-		for (let index = 0; index < fileData.tokens.length; index++) {
-			const t = fileData.tokens[index]
+		for (const t of fileData.tokens) {
 			// ignore fields, we need only top level tokens
 			if (t.kind == TokenKind.ExprField || t == nearestToken)
 				continue
@@ -412,12 +408,7 @@ function findTokensAt(fileData: FixedValidationResult, call: CallChain, exactMat
 	}
 	// maybe we have exact match somewhere
 	const exactName = fileData.tokens.find(t => t.name === call.obj && t._uri == fileData.uri)
-	if (exactName != null)
-		return [exactName]
-	if (exactMatch)
-		return []
-	// lets try to find any token in given range
-	return findTokensUnderCursor(fileData, rangeCenter(call.objRange))
+	return exactName != null ? [exactName] : []
 }
 
 function findTokensUnderCursor(fileData: FixedValidationResult, position: Position): DasToken[] {
