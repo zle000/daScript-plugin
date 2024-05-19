@@ -15,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -136,7 +136,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 	if (doc == null)
 		return []
 	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
-	let key = ""
+	let key = ''
 	let keyRange: Range
 	let i = line.length - 1
 	let tok: DasToken = null
@@ -189,8 +189,6 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		// skip 'as' 'is' '?as' in case when space is delimiter
 		// `foo as |` - converts to ["foo", ""], not to ["foo", "as"]
 		i += key.length
-		// if (key == "as" && line[i] === '?')
-		// 	i++
 		key = ''
 		keyRange = Range.create(pos.line, i + 1, pos.line, i + 1)
 	}
@@ -202,7 +200,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 				break
 		}
 	}
-	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok, tdk: tok ? tok.tdk : "", delimiter: del, brackets: Brackets.None }
+	const keyData: CallChain = { obj: key, objRange: keyRange, token: tok, tdk: tok ? tok.tdk : '', delimiter: del, brackets: Brackets.None }
 
 	let res: CallChain[] = [keyData]
 	while (i > 0) {
@@ -290,7 +288,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 			}
 		}
 
-		let obj = ""
+		let obj = ''
 		for (; i >= 0; i--) {
 			const ch = line[i]
 			if (isValidIdChar(ch))
@@ -300,7 +298,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		}
 		if (obj.length === 0) { break }
 		const objRange = Range.create(pos.line, i + 1, pos.line, i + 1 + obj.length)
-		res.unshift({ obj: obj, objRange: objRange, tdk: "", delimiter: del, brackets: brackets })
+		res.unshift({ obj: obj, objRange: objRange, tdk: '', delimiter: del, brackets: brackets })
 	}
 
 	resolveChainTdk(fileData, res, !forAutocompletion)
@@ -315,7 +313,7 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 		return
 	}
 
-	let prevTdk: string = ""
+	let prevTdk: string = ''
 	var idx = 0
 	while (idx < callChain.length) {
 		const call = callChain[idx]
@@ -385,7 +383,7 @@ function findTokenAt(fileData: FixedValidationResult, call: CallChain, exactMatc
 	for (let index = 0; index < fileData.tokens.length; index++) {
 		const t = fileData.tokens[index]
 		// ignore fields, we need only top level tokens
-		if (t.kind == 'ExprField')
+		if (t.kind == TokenKind.ExprField)
 			continue
 		if (t.name === call.obj && t._uri == fileData.uri && isPositionLess(t._range.start, call.objRange.start) && isPositionLess(nearestPos, t._range.start)) {
 			nearestPos = t._range.start
@@ -465,10 +463,10 @@ connection.onHover(async (textDocumentPosition) => {
 	if (tok != null) {
 		const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
 
-		let res = ""
+		let res = ''
 		let first = true
 		if (!first)
-			res += "\n\n"
+			res += '\n\n'
 		first = false
 		res += describeToken(tok)
 		if (settings.hovers.verbose) {
@@ -478,17 +476,17 @@ connection.onHover(async (textDocumentPosition) => {
 			res += `\n// ${tok.kind}`
 		}
 
-		if (tok.kind == 'field') {
+		if (tok.kind == TokenKind.Field) {
 			res += `\n//^ ${tok.parentTdk}`
 		}
 
-		if (tok.kind == 'ExprCall' /* || tok.kind == 'func' */) {
+		if (tok.kind == TokenKind.ExprCall /* || tok.kind == 'func' */) {
 			const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
 			if (func != null && func.cpp.length > 0)
 				res += `\n[::${func.cpp}(...)]`
 		}
 		else if (tok.tdk.length > 0) {
-			const showBaseType = tok.kind != 'ExprAddr'
+			const showBaseType = tok.kind != TokenKind.ExprAddr
 			for (const td of fileData.completion.typeDecls) {
 				if (td.tdk === tok.tdk) {
 					if (showBaseType && !primitiveBaseType(td, fileData.completion))
@@ -514,7 +512,7 @@ connection.onHover(async (textDocumentPosition) => {
 			res += `\n//${JSON.stringify(tok._range)}`
 		}
 		return {
-			contents: { kind: 'markdown', value: "```dascript\n" + res + "\n```" },
+			contents: { kind: 'markdown', value: '```dascript\n' + res + '\n```' },
 			range: tok._range,
 		}
 	}
@@ -523,7 +521,7 @@ connection.onHover(async (textDocumentPosition) => {
 		for (const td of fileData.completion.typeDecls) {
 			if (td.tdk === tdk) {
 				const res = typeDeclDocs(td, fileData.completion)
-				return { contents: { kind: 'markdown', value: "```dascript\n" + `${last.obj}\n${res}` + "\n```" } }
+				return { contents: { kind: 'markdown', value: '```dascript\n' + `${last.obj}\n${res}` + '\n```' } }
 			}
 		}
 	}
@@ -556,7 +554,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 		// if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
 		// 	return Location.create(res.declAt._uri, res.declAt._range)		
 
-		if (res.kind == "struct" || res.kind == "handle") {
+		if (res.kind == BaseType.tStructure || res.kind == BaseType.tHandle) {
 			// it's fast :)
 			const st = fileData.completion.structs.find(st => st.name === res.name && st.mod === res.mod)
 			if (st != null) {
@@ -584,7 +582,7 @@ connection.onReferences(async (referencesParams) => {
 })
 
 // connection.onDeclaration(async (declarationParams) => {
-// 	console.log("declaration", declarationParams)
+// 	console.log('declaration', declarationParams)
 // 	return null
 // })
 connection.onDefinition(async (declarationParams) => {
@@ -600,13 +598,13 @@ connection.onDefinition(async (declarationParams) => {
 		if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
 			return Location.create(res.declAt._uri, res.declAt._range)
 
-		if (res.kind == 'ExprAddr') {
+		if (res.kind == TokenKind.ExprAddr) {
 			// function call
 			const func = fileData.completion.functions.find(f => f.name === res.name && f.mod === res.mod)
 			if (func != null && func.decl._uri.length > 0 && !isRangeZeroEmpty(func.decl._range))
 				return Location.create(func._uri, func._range)
 		}
-		if (res.kind == "typedecl") {
+		if (res.kind == TokenKind.Typedecl) {
 			for (const td of fileData.completion.typeDecls) {
 				if (td.tdk === res.tdk) {
 					const pos = typeDeclDefinition(td, fileData.completion)
@@ -618,12 +616,12 @@ connection.onDefinition(async (declarationParams) => {
 			}
 		}
 
-		if (res.kind == "ExprGoto") {
+		if (res.kind == TokenKind.ExprGoto) {
 			// TODO: search label with same name
 			// name === goto label 0 -> label 0
 		}
 
-		if (res.kind == "struct" || res.kind == "handle") {
+		if (res.kind == TokenKind.Struct || res.kind == TokenKind.Handle) {
 			const childStructs: Location[] = []
 			for (const st of fileData.completion.structs) {
 				if (st.parentName === res.name && st.parentMod === res.mod && st._uri.length > 0 && !isRangeZeroEmpty(st._range)) {
@@ -635,7 +633,7 @@ connection.onDefinition(async (declarationParams) => {
 		}
 	}
 
-	const parentTdk = res && res.parentTdk.length > 0 ? res.parentTdk : callChain.length > 1 ? callChain[callChain.length - 2].tdk : ""
+	const parentTdk = res && res.parentTdk.length > 0 ? res.parentTdk : callChain.length > 1 ? callChain[callChain.length - 2].tdk : ''
 	if (parentTdk.length > 0) {
 		for (const td of fileData.completion.typeDecls) {
 			if (td.tdk === parentTdk) {
@@ -670,7 +668,7 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 			children: [],
 		}
 		for (const f of st.fields) {
-			if (f.gen || f.name === "__rtti")
+			if (f.gen)
 				continue
 			if (f._uri != documentSymbolParams.textDocument.uri)
 				continue
@@ -1128,7 +1126,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			token._uri = AtToUri(token, uri, settings, res.dasRoot)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
-			if (token.kind == 'ExprField')
+			if (token.kind == TokenKind.ExprField)
 				token.columnEnd += token.name.length
 			token._range = AtToRange(token)
 			// declAt is negative for tokens that are not declared in the source code
@@ -1138,11 +1136,11 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			}
 			else {
 				token.declAt._range = Range.create(0, 0, 0, 0)
-				token.declAt._uri = ""
+				token.declAt._uri = ''
 			}
 			fixedResults.tokens.push(token)
 			// TODO: add completion items for tokens
-			if (token.kind == 'ExprVar') {
+			if (token.kind == TokenKind.ExprVar) {
 				addCompletionItem(map, {
 					label: token.name,
 					kind: CompletionItemKind.Variable,
@@ -1160,7 +1158,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			if (item.detail.length > 0) {
 				item.documentation = {
 					kind: 'markdown',
-					value: "```dascript\n" + item.documentation + "\n```"
+					value: '```dascript\n' + item.documentation + '\n```'
 				}
 			}
 		}

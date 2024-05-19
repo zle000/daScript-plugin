@@ -51,55 +51,54 @@ def fill_at(var res; at : LineInfo)
 
 
 def BaseTypeString(t : rtti::Type) : string
+    return "none" if t == Type none
+    return "auto" if t == Type autoinfer
+    return "alias" if t == Type alias
+    return "option" if t == Type option
+    return "<context>" if t == Type fakeContext
+    return "<line info>" if t == Type fakeLineInfo
+    return "any" if t == Type anyArgument
     return "void" if t == Type tVoid
     return "bool" if t == Type tBool
     return "int8" if t == Type tInt8
     return "int16" if t == Type tInt16
-    return "int32" if t == Type tInt
-    return "int64" if t == Type tInt64
     return "uint8" if t == Type tUInt8
     return "uint16" if t == Type tUInt16
-    return "uint32" if t == Type tUInt
+    return "int64" if t == Type tInt64
     return "uint64" if t == Type tUInt64
-    return "float" if t == Type tFloat
-    return "double" if t == Type tDouble
-    return "string" if t == Type tString
-    return "structure" if t == Type tStructure
-    return "table" if t == Type tTable
-    return "array" if t == Type tArray
-    return "bitfield" if t == Type tBitfield
-    return "alias" if t == Type alias
-    return "any" if t == Type anyArgument
-    return "auto" if t == Type autoinfer
-    return "<context>" if t == Type fakeContext
-    return "<line info>" if t == Type fakeLineInfo
-    return "none" if t == Type none
-    return "option" if t == Type option
-    return "enum" if t == Type tEnumeration
-    return "enum8" if t == Type tEnumeration8
-    return "enum16" if t == Type tEnumeration16
-    return "float2" if t == Type tFloat2
-    return "float3" if t == Type tFloat3
-    return "float4" if t == Type tFloat4
-    return "function" if t == Type tFunction
-    return "handle" if t == Type tHandle
+    return "int32" if t == Type tInt
     return "int2" if t == Type tInt2
     return "int3" if t == Type tInt3
     return "int4" if t == Type tInt4
+    return "uint32" if t == Type tUInt
     return "uint2" if t == Type tUInt2
     return "uint3" if t == Type tUInt3
     return "uint4" if t == Type tUInt4
-    return "pointer" if t == Type tPointer
-    return "block" if t == Type tBlock
-    return "iterator" if t == Type tIterator
-    return "lambda" if t == Type tLambda
-    return "variant" if t == Type tVariant
-    return "void" if t == Type tVoid
+    return "float" if t == Type tFloat
+    return "float2" if t == Type tFloat2
+    return "float3" if t == Type tFloat3
+    return "float4" if t == Type tFloat4
+    return "double" if t == Type tDouble
     return "range" if t == Type tRange
     return "urange" if t == Type tURange
     return "range64" if t == Type tRange64
     return "urange64" if t == Type tURange64
+    return "string" if t == Type tString
+    return "structure" if t == Type tStructure
+    return "handle" if t == Type tHandle
+    return "enum" if t == Type tEnumeration
+    return "enum8" if t == Type tEnumeration8
+    return "enum16" if t == Type tEnumeration16
+    return "bitfield" if t == Type tBitfield
+    return "pointer" if t == Type tPointer
+    return "function" if t == Type tFunction
+    return "lambda" if t == Type tLambda
+    return "iterator" if t == Type tIterator
+    return "array" if t == Type tArray
+    return "table" if t == Type tTable
+    return "block" if t == Type tBlock
     return "tuple" if t == Type tTuple
+    return "variant" if t == Type tVariant
     panic("unknown type: {t}")
     return "{t}"
 
