@@ -66,11 +66,11 @@ def BaseTypeString(t : rtti::Type) : string
     return "uint16" if t == Type tUInt16
     return "int64" if t == Type tInt64
     return "uint64" if t == Type tUInt64
-    return "int32" if t == Type tInt
+    return "int" if t == Type tInt
     return "int2" if t == Type tInt2
     return "int3" if t == Type tInt3
     return "int4" if t == Type tInt4
-    return "uint32" if t == Type tUInt
+    return "uint" if t == Type tUInt
     return "uint2" if t == Type tUInt2
     return "uint3" if t == Type tUInt3
     return "uint4" if t == Type tUInt4

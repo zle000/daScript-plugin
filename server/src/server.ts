@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdks, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -317,8 +317,14 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 	}
 
 	let prevTdks: Set<string>
+	let prevBrackets: Brackets = Brackets.None
+	let prevDelimiter: Delimiter = Delimiter.None
 	var idx = 0
 	while (idx < callChain.length) {
+		if (idx > 0) {
+			prevBrackets = callChain[idx - 1].brackets
+			prevDelimiter = callChain[idx - 1].delimiter
+		}
 		const call = callChain[idx]
 		idx++
 		// maybe already exists token
@@ -342,9 +348,15 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 				for (const prevTdk of prevTdks) {
 					let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
 					if (typeDeclData != null) {
-						const nextTdks = typeDeclItemTdks(typeDeclData, fileData.completion, call.obj)
-						for (const it of nextTdks)
-							call.tdks.add(it)
+						var next: CompletionItem[] = []
+						const nextTdks = typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
+						if (nextTdks.tdk != prevTdk) {
+							call.tdks.add(nextTdks.tdk)
+						}
+						for (const it of next) {
+							if (it.label == call.obj)
+								call.tdks.add(it.data)
+						}
 					}
 				}
 				prevTdks = call.tdks

@@ -20,11 +20,11 @@ export enum BaseType {
     tUInt16 = 'uint16',
     tInt64 = 'int64',
     tUInt64 = 'uint64',
-    tInt = 'int32',
+    tInt = 'int',
     tInt2 = 'int2',
     tInt3 = 'int3',
     tInt4 = 'int4',
-    tUInt = 'uint32',
+    tUInt = 'uint',
     tUInt2 = 'uint2',
     tUInt3 = 'uint3',
     tUInt4 = 'uint4',
@@ -424,43 +424,10 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
     return res
 }
 
-
-export function typeDeclItemTdks(td: CompletionTypeDecl, cr: CompletionResult, name: string): string[] {
-    let res: string[] = []
-    typeDeclIter(td, cr, function (td, st, en) {
-        if (st) {
-            for (const f of st.fields) {
-                if (f.name === name) {
-                    res.push(f.tdk)
-                    break
-                }
-            }
-        }
-        if (en) {
-            for (const v of en.values) {
-                if (v.name === name) {
-                    res.push(td.tdk)
-                    break
-                }
-            }
-        }
-    })
-    if (res.length > 0)
-        return res
-
-    // return td
-    for (const f of td.fields) {
-        if (f.name === name)
-            return [f.tdk]
-    }
-    return res // not found
-}
-
-
 // returns actual CompletionTypeDecl
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
     let resultTd = td
-    if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0) {
+    if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0 && brackets != Brackets.Square) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st) {
             st.fields.forEach(f => {
@@ -469,6 +436,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                 c.kind = CompletionItemKind.Field
                 c.detail = structFieldDetail(f)
                 c.documentation = structFieldDocs(f, st)
+                c.data = f.tdk
                 res.push(c)
             })
         }
@@ -476,7 +444,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
     }
     // enum with zero name == unspecified enumeration const
-    if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
+    if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0 && brackets != Brackets.Square) {
         const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
         if (en) {
             en.values.forEach(v => {
@@ -484,6 +452,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                 c.kind = CompletionItemKind.EnumMember
                 c.detail = enumValueDetail(v)
                 c.documentation = enumValueDocs(v, en)
+                c.data = en.tdk
                 res.push(c)
             })
         }
@@ -501,7 +470,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     if ((td.baseType === BaseType.tPointer || ((td.baseType === BaseType.tArray || td.dim.length > 0) && brackets == Brackets.Square)) && td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
-            resultTd = typeDeclCompletion(td1, cr, delimiter, brackets, res)
+            resultTd = typeDeclCompletion(td1, cr, Delimiter.None, Brackets.None, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
@@ -509,7 +478,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     if (td.baseType === BaseType.tTable && brackets == Brackets.Square && td.dim.length == 0 && td.tdk1.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
-            resultTd = typeDeclCompletion(td2, cr, delimiter, brackets, res)
+            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
@@ -522,22 +491,39 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             c.kind = CompletionItemKind.Field
             c.detail = typeDeclFieldDetail(f)
             c.documentation = typeDeclFieldDocs(f, resultTd)
+            c.data = f.tdk
             res.push(c)
         })
     }
     if (td.baseType == BaseType.tFloat2 || td.baseType == BaseType.tFloat3 || td.baseType == BaseType.tFloat4
-        || td.baseType == BaseType.tInt2 || td.baseType == BaseType.tInt3 || td.baseType == BaseType.tInt4
-        || td.baseType == BaseType.tUInt2 || td.baseType == BaseType.tUInt3 || td.baseType == BaseType.tUInt4
+        || td.baseType == BaseType.tInt2 || td.baseType == BaseType.tInt3 || td.baseType == BaseType.tInt4 || td.baseType == BaseType.tRange
+        || td.baseType == BaseType.tUInt2 || td.baseType == BaseType.tUInt3 || td.baseType == BaseType.tUInt4 || td.baseType == BaseType.tURange
     ) {
-        let dim = td.baseType.endsWith('2') ? 2 : td.baseType.endsWith('3') ? 3 : 4
-        let type = td.baseType.startsWith('f') ? 'float' : td.baseType.startsWith('u') ? 'uint' : 'int'
-        const fieldsStr = 'xyzw'
-        for (let i = 0; i < dim; i++) {
-            const c = CompletionItem.create(fieldsStr.charAt(i))
-            c.kind = CompletionItemKind.Field
-            c.detail = `${c.label} : ${type}`
-            res.push(c)
+        let dim = td.baseType.endsWith('4') ? 4 : td.baseType.endsWith('3') ? 3 : 2
+        let type = td.baseType.startsWith('f') ? BaseType.tFloat : td.baseType.startsWith('u') ? BaseType.tUInt : BaseType.tInt
+        if (brackets != Brackets.Square) {
+            const fieldsStr = 'xyzw'
+            for (let i = 0; i < dim; i++) {
+                const c = CompletionItem.create(fieldsStr.charAt(i))
+                c.kind = CompletionItemKind.Field
+                c.detail = `${c.label} : ${type}`
+                c.data = type
+                res.push(c)
+            }
         }
+        const td2 = cr.typeDecls.find(t => t.tdk === type)
+        if (td2)
+            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+    }
+    else if (td.baseType == BaseType.tRange64) {
+        const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tInt64)
+        if (td2)
+            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+    }
+    else if (td.baseType == BaseType.tURange64) {
+        const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
+        if (td2)
+            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
     }
     return resultTd
 }
