@@ -661,7 +661,6 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	if (!fileData)
 		return null
 	const res: DocumentSymbol[] = []
-	// TODO: add enums, typedefs, etc
 	for (const st of fileData.completion.structs) {
 		if (st.gen)
 			continue
@@ -689,16 +688,54 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 		}
 		res.push(stRes)
 	}
+	for (const en of fileData.completion.enums) {
+		if (en._uri != documentSymbolParams.textDocument.uri)
+			continue
+		const enRes: DocumentSymbol = {
+			name: en.name,
+			kind: SymbolKind.Enum,
+			detail: enumDetail(en),
+			range: en._range,
+			selectionRange: en._range,
+			children: [],
+		}
+		for (const ev of en.values) {
+			if (ev._uri != documentSymbolParams.textDocument.uri)
+				continue
+			enRes.children.push({
+				name: ev.name,
+				kind: SymbolKind.EnumMember,
+				detail: enumValueDetail(ev),
+				range: ev._range,
+				selectionRange: ev._range,
+			})
+		}
+		res.push(enRes)
+	}
 	for (const td of fileData.completion.typeDefs) {
 		if (td._uri != documentSymbolParams.textDocument.uri)
 			continue
-		res.push({
+		let tdRes: DocumentSymbol = {
 			name: td.name,
 			kind: SymbolKind.Interface,
 			detail: typedefDetail(td),
 			range: td._range,
 			selectionRange: td._range,
-		})
+			children: [],
+		}
+		res.push(tdRes)
+		const ctd = fileData.completion.typeDecls.find(it => it.tdk === td.tdk)
+		if (ctd != null) {
+			for (const f of ctd.fields) {
+				tdRes.children.push({
+					name: f.name,
+					kind: SymbolKind.Field,
+					detail: typeDeclFieldDetail(f),
+					range: td._range,
+					selectionRange: td._range,
+				})
+			}
+		}
 	}
 	for (const fn of fileData.completion.functions) {
 		if (fn.gen || fn.isClassMethod)
