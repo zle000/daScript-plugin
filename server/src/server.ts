@@ -185,11 +185,14 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		keyRange = Range.create(pos.line, i + 1, pos.line, i + 1 + key.length)
 	}
 
-	if (del === Delimiter.Space && (key == "as" || key == "is" || key == "?as")) {
+	if (del === Delimiter.Space && (key == 'as' || key == 'is')) {
 		// skip 'as' 'is' '?as' in case when space is delimiter
 		// `foo as |` - converts to ["foo", ""], not to ["foo", "as"]
-		key = ""
-		keyRange = Range.create(pos.line, i + 1 + key.length, pos.line, i + 1 + key.length)
+		i += key.length
+		// if (key == "as" && line[i] === '?')
+		// 	i++
+		key = ''
+		keyRange = Range.create(pos.line, i + 1, pos.line, i + 1)
 	}
 	else {
 		// skip spaces
@@ -222,6 +225,10 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 			i -= 2
 			del = Delimiter.Arrow
 		}
+		else if (i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?') {
+			i -= 3
+			del = Delimiter.QuestionAs
+		}
 		else if (i > 0 && line[i] === 's' && line[i - 1] === 'a') {
 			i -= 2
 			del = Delimiter.As
@@ -229,10 +236,6 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		else if (i > 0 && line[i] === 's' && line[i - 1] === 'i') {
 			i -= 2
 			del = Delimiter.Is
-		}
-		else if (i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?') {
-			i -= 3
-			del = Delimiter.QuestionAs
 		}
 		else if (i > 0 && line[i] === '>' && line[i - 1] === '|') {
 			i -= 2
@@ -271,6 +274,11 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 						i-- // skip last bracket
 						break
 					}
+				}
+
+				if (brackets == Brackets.Square && i >= 0 && line[i] === '?') {
+					// ?[] case, skip '?'
+					i--
 				}
 
 				// skip spaces
@@ -318,18 +326,6 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			prevTdk = call.tdk
 			continue
 		}
-		if (prevTdk.length > 0 && call.obj.length > 0) {
-			// resolve tdk for type decls
-			let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
-			if (typeDeclData != null) {
-				const nextTdk = typeDeclItemTdk(typeDeclData, fileData.completion, call.obj)
-				if (nextTdk.length > 0) {
-					call.tdk = nextTdk
-					prevTdk = nextTdk
-					continue
-				}
-			}
-		}
 		if (idx == 1) {
 			const tok = call.token ? call.token : findTokenAt(fileData, call, /*exact match*/true)
 			if (tok != null) {
@@ -339,14 +335,28 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 				continue
 			}
 		}
-		if (call.delimiter == Delimiter.Space && call.obj.length > 0) {
-			// maybe enum
-			// TODO: add bitfields here too
-			const enumData = fileData.completion.enums.find(e => e.name === call.obj)
-			if (enumData != null) {
-				call.tdk = enumData.tdk
-				prevTdk = enumData.tdk
-				continue
+		if (call.obj.length > 0) {
+			if (prevTdk.length > 0) {
+				// resolve tdk for type decls
+				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
+				if (typeDeclData != null) {
+					const nextTdk = typeDeclItemTdk(typeDeclData, fileData.completion, call.obj)
+					if (nextTdk.length > 0) {
+						call.tdk = nextTdk
+						prevTdk = nextTdk
+						continue
+					}
+				}
+			}
+			if (call.delimiter == Delimiter.Space) {
+				// maybe enum
+				// TODO: add bitfields here too
+				const enumData = fileData.completion.enums.find(e => e.name === call.obj)
+				if (enumData != null) {
+					call.tdk = enumData.tdk
+					prevTdk = enumData.tdk
+					continue
+				}
 			}
 		}
 		// failed to resolve tdk
@@ -414,6 +424,8 @@ connection.onCompletion(async (textDocumentPosition) => {
 		if (call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe) {
 			// fill extension functions
 			for (const fn of fileData.completion.functions) {
+				if (fn.isClassMethod)
+					continue
 				// TODO: ignore const cases: Foo const == Foo
 				// TODO: convert dot to pipe
 				if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {

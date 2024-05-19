@@ -313,7 +313,7 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
 // returns actual tdk name
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
     let resultTd = td
-    if (td.baseType === 'structure' || td.baseType === 'handle') {
+    if ((td.baseType === 'structure' || td.baseType === 'handle') && td.dim.length == 0) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st) {
             st.fields.forEach(f => {
@@ -329,7 +329,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
     }
     // enum with zero name == unspecified enumeration const
-    if (td.baseType === 'enum' && td.enumName.length > 0) {
+    if (td.baseType === 'enum' && td.dim.length == 0 && td.enumName.length > 0) {
         const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
         if (en) {
             en.values.forEach(v => {
@@ -351,7 +351,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}`)
     // }
     // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
-    if ((td.baseType === 'pointer' || (td.baseType === 'array' && brackets == Brackets.Square)) && td.tdk1.length > 0) {
+    if ((td.baseType === 'pointer' || ((td.baseType === 'array' || td.dim.length > 0) && brackets == Brackets.Square)) && td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
             resultTd = typeDeclCompletion(td1, cr, delimiter, brackets, res)
@@ -359,7 +359,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
     // table with empty tdk2 is unspecified table
-    if (td.baseType === 'table' && brackets == Brackets.Square && td.tdk1.length > 0) {
+    if (td.baseType === 'table' && brackets == Brackets.Square && td.dim.length == 0 && td.tdk1.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
             resultTd = typeDeclCompletion(td2, cr, delimiter, brackets, res)
@@ -367,13 +367,17 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
     // return td
-    td.fields.forEach(f => {
-        const c = CompletionItem.create(f.name)
-        c.kind = CompletionItemKind.Field
-        c.detail = typeDeclFieldDetail(f)
-        c.documentation = typeDeclFieldDocs(f, td)
-        res.push(c)
-    })
+    const asIs = delimiter == Delimiter.As || delimiter == Delimiter.Is || delimiter == Delimiter.QuestionAs
+    if (asIs == (td.baseType === 'variant') && td.dim.length == 0) {
+        td.fields.forEach(f => {
+
+            const c = CompletionItem.create(f.name)
+            c.kind = CompletionItemKind.Field
+            c.detail = typeDeclFieldDetail(f)
+            c.documentation = typeDeclFieldDocs(f, td)
+            res.push(c)
+        })
+    }
     return resultTd
 }
 

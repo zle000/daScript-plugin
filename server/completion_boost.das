@@ -7,6 +7,7 @@ options no_aot
 
 require ast
 require rtti
+require math
 require strings
 require daslib/strings_boost
 
@@ -250,22 +251,22 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
     res.typeDecls[tdk] = foundIdx
     // if t.argNames |> length() > 0
     var td <- [[CompletionTypeDecl() tdk=tdk, baseType=BaseTypeString(t.baseType)]]
-    if length(t.argNames) == length(t.argTypes)
-        for argN, argT in t.argNames, t.argTypes
-            var tf <- [[CompletionTypeDeclField() name="{argN}"]]
-            tf.tdk = TypeDeclKey(argT)
-            res |> parse_typedecl(tf.tdk, argT)
-            td.fields |> emplace(tf)
-    elif length(t.argNames) > 0
-        for argN in t.argNames
-            var tf <- [[CompletionTypeDeclField() name="{argN}"]]
-            td.fields |> emplace(tf)
-    elif length(t.argTypes) > 0
-        for idx, argT in count(), t.argTypes
-            var tf <- [[CompletionTypeDeclField() name="arg{idx+1}"]]
-            tf.tdk = TypeDeclKey(argT)
-            res |> parse_typedecl(tf.tdk, argT)
-            td.fields |> emplace(tf)
+    let totalArgs = min(length(t.argNames), length(t.argTypes))
+    for idx,argN, argT in count(), t.argNames, t.argTypes
+        var tf <- [[CompletionTypeDeclField() name=length(argN) > 0 ? "{argN}" : "_{idx}"]]
+        tf.tdk = TypeDeclKey(argT)
+        res |> parse_typedecl(tf.tdk, argT)
+        td.fields |> emplace(tf)
+    for i in totalArgs..length(t.argNames)
+        assume argN = t.argNames[i]
+        var tf <- [[CompletionTypeDeclField() name="{argN}"]]
+        td.fields |> emplace(tf)
+    for idx in totalArgs..length(t.argTypes)
+        assume argT = t.argTypes[idx]
+        var tf <- [[CompletionTypeDeclField() name="_{idx}"]]
+        tf.tdk = TypeDeclKey(argT)
+        res |> parse_typedecl(tf.tdk, argT)
+        td.fields |> emplace(tf)
     td |> fill_at(t.at)
     td.alias = t.alias |> string()
     for i in t.dim
@@ -285,6 +286,11 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
     if t.firstType != null
         td.tdk1 = TypeDeclKey(t.firstType)
         res |> parse_typedecl(td.tdk1, t.firstType)
+    elif length(t.dim) > 0
+        var inscope sub <- t |> clone_type()
+        sub.dim |> pop()
+        parse_typedecl(res, TypeDeclKey(sub), sub)
+        td.tdk1 = TypeDeclKey(sub)
     if t.secondType != null
         td.tdk2 = TypeDeclKey(t.secondType)
         res |> parse_typedecl(td.tdk2, t.secondType)
