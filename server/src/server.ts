@@ -336,7 +336,7 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			}
 		}
 		if (call.obj.length > 0) {
-			if (prevTdks.size > 0) {
+			if (prevTdks && prevTdks.size > 0) {
 				// resolve tdk for type decls
 				for (const prevTdk of prevTdks) {
 					let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
@@ -477,10 +477,10 @@ connection.onHover(async (textDocumentPosition) => {
 		return null
 	// console.log(JSON.stringify(callChain))
 	const last = callChain[callChain.length - 1]
+	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
 	let res = ''
 	let first = true
 	for (const tok of last.tokens) {
-		const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
 
 		if (!first)
 			res += '\n'
