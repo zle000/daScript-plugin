@@ -350,13 +350,24 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			}
 			if (call.delimiter == Delimiter.Space) {
 				// maybe enum
-				// TODO: add bitfields here too
 				const enumData = fileData.completion.enums.find(e => e.name === call.obj)
 				if (enumData != null) {
 					call.tdk = enumData.tdk
 					prevTdk = enumData.tdk
 					continue
 				}
+				// or bitfield
+				let found = false
+				for (const td of fileData.completion.typeDecls) {
+					if (td.baseType == 'bitfield' && td.alias == call.obj) {
+						call.tdk = td.tdk
+						prevTdk = td.tdk
+						found = true
+						break
+					}
+				}
+				if (found)
+					continue
 			}
 		}
 		// failed to resolve tdk
