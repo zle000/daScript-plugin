@@ -518,6 +518,20 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             res.push(c)
         })
     }
+    if (td.baseType == BaseType.tFloat2 || td.baseType == BaseType.tFloat3 || td.baseType == BaseType.tFloat4
+        || td.baseType == BaseType.tInt2 || td.baseType == BaseType.tInt3 || td.baseType == BaseType.tInt4
+        || td.baseType == BaseType.tUInt2 || td.baseType == BaseType.tUInt3 || td.baseType == BaseType.tUInt4
+    ) {
+        let dim = td.baseType.endsWith('2') ? 2 : td.baseType.endsWith('3') ? 3 : 4
+        let type = td.baseType.startsWith('f') ? 'float' : td.baseType.startsWith('u') ? 'uint' : 'int'
+        const fieldsStr = "xyzw"
+        for (let i = 0; i < dim; i++) {
+            const c = CompletionItem.create(fieldsStr.charAt(i))
+            c.kind = CompletionItemKind.Field
+            c.detail = `${c.label} : ${type}`
+            res.push(c)
+        }
+    }
     return resultTd
 }
 
