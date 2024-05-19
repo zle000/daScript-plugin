@@ -1,4 +1,4 @@
-import { CompletionItem, CompletionItemKind, Position, Range, integer } from 'vscode-languageserver/node'
+import { CompletionItem, CompletionItemKind, Location, Position, Range, integer } from 'vscode-languageserver/node'
 import { DasSettings } from './dasSettings'
 import fs = require('fs')
 import path = require('path')
@@ -144,6 +144,11 @@ export interface CompletionAt {
 
     _range: Range
     _uri: string
+}
+
+export function addValidLocation(res: Location[], at: CompletionAt): void {
+    if (at != null && at._uri.length > 0 && !isRangeZeroEmpty(at._range))
+        res.push(Location.create(at._uri, at._range))
 }
 
 export interface CompletionEnumValue extends CompletionAt {
@@ -670,8 +675,7 @@ export function isRangeLess(a: Range, b: Range) {
     return (lenA2 < lenB2)
 }
 
-export function isRangeEqual(a : Range, b : Range)
-{
+export function isRangeEqual(a: Range, b: Range) {
     return isPositionEqual(a.start, b.start) && isPositionEqual(a.end, b.end)
 }
 
@@ -695,8 +699,7 @@ export function isPositionLessOrEqual(a: Position, b: Position) {
     return a.character <= b.character
 }
 
-export function isPositionEqual(a : Position, b : Position)
-{
+export function isPositionEqual(a: Position, b: Position) {
     return a.line == b.line && a.character == b.character
 }
 

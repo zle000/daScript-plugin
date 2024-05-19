@@ -15,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -564,9 +564,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 		for (const td of fileData.completion.typeDecls) {
 			if (td.tdk === resTdk) {
 				const pos = typeDeclDefinition(td, fileData.completion)
-				if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
-					res.push(Location.create(pos._uri, pos._range))
-				}
+				addValidLocation(res, pos)
 			}
 		}
 	}
@@ -580,9 +578,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 			const st = fileData.completion.structs.find(st => st.name === tok.name && st.mod === tok.mod)
 			if (st != null) {
 				const st2 = getParentStruct(st, fileData.completion)
-				if (st2 != null && st2._uri.length > 0 && !isRangeZeroEmpty(st2._range)) {
-					res.push(Location.create(st2._uri, st2._range))
-				}
+				addValidLocation(res, st2)
 			}
 		}
 	}
@@ -616,22 +612,19 @@ connection.onDefinition(async (declarationParams) => {
 	let res: Location[] = []
 	const last = callChain[callChain.length - 1]
 	for (const tok of last.tokens) {
-		if (tok.declAt._uri?.length != 0 && !isRangeZeroEmpty(tok.declAt._range))
-			return Location.create(tok.declAt._uri, tok.declAt._range)
+		addValidLocation(res, tok.declAt)
 
 		if (tok.kind == TokenKind.ExprAddr) {
 			// function call
 			const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
-			if (func != null && func.decl._uri.length > 0 && !isRangeZeroEmpty(func.decl._range))
-				res.push(Location.create(func._uri, func._range))
+			if (func)
+				addValidLocation(res, func.decl)
 		}
 		if (tok.kind == TokenKind.Typedecl) {
 			for (const td of fileData.completion.typeDecls) {
 				if (td.tdk === tok.tdk) {
 					const pos = typeDeclDefinition(td, fileData.completion)
-					if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
-						res.push(Location.create(pos._uri, pos._range))
-					}
+					addValidLocation(res, pos)
 					break
 				}
 			}
@@ -644,8 +637,8 @@ connection.onDefinition(async (declarationParams) => {
 
 		if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
 			for (const st of fileData.completion.structs) {
-				if (st.parentName === tok.name && st.parentMod === tok.mod && st._uri.length > 0 && !isRangeZeroEmpty(st._range)) {
-					res.push(Location.create(st._uri, st._range))
+				if (st.parentName === tok.name && st.parentMod === tok.mod) {
+					addValidLocation(res, st)
 				}
 			}
 		}
@@ -656,9 +649,7 @@ connection.onDefinition(async (declarationParams) => {
 				if (td.tdk === parentTdk) {
 					// TODO: find pos for field tdk.name
 					const pos = typeDeclDefinition(td, fileData.completion)
-					if (pos._uri.length > 0 && !isRangeZeroEmpty(pos._range)) {
-						res.push(Location.create(pos._uri, pos._range))
-					}
+					addValidLocation(res, pos)
 				}
 			}
 		}
