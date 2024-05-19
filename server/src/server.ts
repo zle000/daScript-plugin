@@ -431,36 +431,34 @@ function findTokensUnderCursor(fileData: FixedValidationResult, position: Positi
 
 connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
-	const res: CompletionItem[] = []
 	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	if (callChain.length === 0)
-		return res
-	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
-	let completionTdks = call.tdks
-	if (completionTdks.size > 0) {
-		for (const completionTdk of completionTdks) {
-			let actualTdk = ''
-			let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
-			if (typeDeclData != null) {
-				let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
-				if (resTd.tdk.length > 0)
-					actualTdk = resTd.tdk
-			}
+		return fileData.completionItems
 
-			if (actualTdk.length > 0 && call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe) {
-				// fill extension functions
-				for (const fn of fileData.completion.functions) {
-					if (fn.isClassMethod)
-						continue
-					// TODO: ignore const cases: Foo const == Foo
-					// TODO: convert dot to pipe
-					if (fn.args.length > 0 && fn.args[0].tdk === completionTdk) {
-						const c = CompletionItem.create(fn.name)
-						c.detail = funcDetail(fn)
-						c.documentation = funcDocs(fn)
-						c.kind = CompletionItemKind.Function
-						res.push(c)
-					}
+	const res: CompletionItem[] = []
+	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
+	for (const completionTdk of call.tdks) {
+		let actualTdk = completionTdk
+		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
+		if (typeDeclData != null) {
+			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
+			if (resTd.tdk.length > 0)
+				actualTdk = resTd.tdk
+		}
+
+		if (actualTdk.length > 0 && (call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
+			// fill extension functions
+			for (const fn of fileData.completion.functions) {
+				if (fn.isClassMethod)
+					continue
+				// TODO: ignore const cases: Foo const == Foo
+				// TODO: convert dot to pipe
+				if (fn.args.length > 0 && fn.args[0].tdk === actualTdk) {
+					const c = CompletionItem.create(fn.name)
+					c.detail = funcDetail(fn)
+					c.documentation = funcDocs(fn)
+					c.kind = CompletionItemKind.Function
+					res.push(c)
 				}
 			}
 		}
