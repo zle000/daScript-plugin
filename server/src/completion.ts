@@ -68,9 +68,9 @@ export enum TokenKind {
     ExprLet = 'ExprLet',
     Field = 'field',
     Handle = 'handle',
-	ExprAddr = 'ExprAddr',
-	ExprGoto = 'ExprGoto',
-	ExprField = 'ExprField',
+    ExprAddr = 'ExprAddr',
+    ExprGoto = 'ExprGoto',
+    ExprField = 'ExprField',
 }
 
 export function isValidIdChar(ch: string) {
@@ -350,12 +350,11 @@ export function primitiveBaseType(td: CompletionTypeDecl, cr: CompletionResult):
     )
 }
 
-// TODO: print dim size
-export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): string {
+export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (td: CompletionTypeDecl, st: CompletionStruct, en: CompletionEnum) => void): void {
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st)
-            return structDocs(st)
+            return cb(td, st, null)
         else
             console.error(`typeDeclDocs: failed to find struct ${td.structName} in ${td.mod}`)
     }
@@ -363,7 +362,7 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
     if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
         const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
         if (en)
-            return enumDocs(en)
+            return cb(td, null, en)
         else
             console.error(`typeDeclDocs: failed to find enum ${td.enumName} in ${td.mod}`)
     }
@@ -375,33 +374,83 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
     // 		console.error(`typeDeclDocs: failed to find function ${td.tdk} in ${td.mod}`)
     // }
     // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
-    if ((td.baseType === BaseType.tPointer || td.baseType === BaseType.tArray || td.dim.length > 0) && td.tdk1.length > 0) {
+    // if ((td.baseType === BaseType.tPointer || td.baseType === BaseType.tArray || td.dim.length > 0) && td.tdk1.length > 0) {
+    if (td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
-            return typeDeclDocs(td1, cr)
+            return typeDeclIter(td1, cr, cb)
         else
             console.error(`typeDeclDocs: failed to find type ${td.tdk1}`)
     }
     // table with empty tdk2 is unspecified table
-    if (td.baseType === BaseType.tTable && td.dim.length == 0 && td.tdk1.length > 0) {
+    // if (td.baseType === BaseType.tTable && td.dim.length == 0 && td.tdk2.length > 0) {
+    if (td.tdk2.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
-            return typeDeclDocs(td2, cr)
+            return typeDeclIter(td2, cr, cb)
         else
             console.error(`typeDeclDocs: failed to find type ${td.tdk2}`)
     }
-    let res = `${modPrefix(td.mod)}${td.tdk}`
-    if (td.baseType != td.tdk)
-        res += ` // ${td.baseType}` // TODO: remove this part
-    // TODO: variant, tuple
-    if (td.fields.length > 0)
-        res += `\n${td.fields.map(f => `  ${f.name}: ${f.tdk}`).join('\n')}`
+}
+
+// TODO: print dim size
+export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): string {
+    let res = ''
+    typeDeclIter(td, cr, function (td, st, en) {
+        if (st)
+            res += structDocs(st)
+        if (en)
+            res += enumDocs(en)
+    })
+
+    if (res.length == 0) {
+        res = `${modPrefix(td.mod)}${td.tdk}`
+        if (td.baseType != td.tdk)
+            res += ` // ${td.baseType}` // TODO: remove this part
+        // TODO: variant, tuple
+        if (td.fields.length > 0)
+            res += `\n${td.fields.map(f => `  ${f.name}: ${f.tdk}`).join('\n')}`
+    }
 
     return res
 }
 
 
-// returns actual tdk name
+export function typeDeclItemTdk(td: CompletionTypeDecl, cr: CompletionResult, name: string): string {
+    let res = ''
+    typeDeclIter(td, cr, function (td, st, en) {
+        if (res.length > 0)
+            return
+        if (st) {
+            for (const f of st.fields) {
+                if (f.name === name) {
+                    res = f.tdk
+                    return
+                }
+            }
+        }
+        if (en) {
+            for (const v of en.values) {
+                if (v.name === name) {
+                    res = td.tdk
+                    return
+                }
+            }
+        }
+    })
+    if (res.length > 0)
+        return res
+
+    // return td
+    for (const f of td.fields) {
+        if (f.name === name)
+            return f.tdk
+    }
+    return '' // not found
+}
+
+
+// returns actual CompletionTypeDecl
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
     let resultTd = td
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0) {
@@ -459,81 +508,18 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     }
     // return td
     const asIs = delimiter == Delimiter.As || delimiter == Delimiter.Is || delimiter == Delimiter.QuestionAs
-    if (asIs == (td.baseType === BaseType.tVariant) && td.dim.length == 0) {
-        td.fields.forEach(f => {
+    if (asIs == (resultTd.baseType === BaseType.tVariant) && resultTd.dim.length == 0) {
+        resultTd.fields.forEach(f => {
 
             const c = CompletionItem.create(f.name)
             c.kind = CompletionItemKind.Field
             c.detail = typeDeclFieldDetail(f)
-            c.documentation = typeDeclFieldDocs(f, td)
+            c.documentation = typeDeclFieldDocs(f, resultTd)
             res.push(c)
         })
     }
     return resultTd
 }
-
-
-export function typeDeclItemTdk(td: CompletionTypeDecl, cr: CompletionResult, name: string): string {
-    if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0) {
-        const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
-        if (st) {
-            for (const f of st.fields) {
-                if (f.name === name)
-                    return f.tdk
-            }
-        }
-        else
-            console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
-    }
-    // enum with zero name == unspecified enumeration const
-    if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
-        const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
-        if (en) {
-            for (const v of en.values) {
-                if (v.name === name)
-                    return td.tdk
-            }
-        }
-        else
-            console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
-    }
-    // if (td.baseType === BaseType.tFunction) {
-    // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)
-    // 	if (func)
-    // 		return func.decl
-    // 	else
-    // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}`)
-    // }
-    // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
-    if ((td.baseType === BaseType.tPointer || td.baseType === BaseType.tArray || td.dim.length > 0) && td.tdk1.length > 0) {
-        const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
-        if (td1) {
-            const res = typeDeclItemTdk(td1, cr, name)
-            if (res.length > 0)
-                return res
-        }
-        else
-            console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
-    }
-    // table with empty tdk2 is unspecified table
-    if (td.baseType === BaseType.tTable && td.dim.length == 0 && td.tdk1.length > 0) {
-        const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
-        if (td2) {
-            const res = typeDeclItemTdk(td2, cr, name)
-            if (res.length > 0)
-                return res
-        }
-        else
-            console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
-    }
-    // return td
-    for (const f of td.fields) {
-        if (f.name === name)
-            return f.tdk
-    }
-    return '' // not found
-}
-
 
 export interface CompletionTypeDef extends CompletionAt {
     name: string
