@@ -257,9 +257,9 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
         tf.tdk = TypeDeclKey(argT)
         res |> parse_typedecl(tf.tdk, argT)
         td.fields |> emplace(tf)
-    for i in totalArgs..length(t.argNames)
-        assume argN = t.argNames[i]
-        var tf <- [[CompletionTypeDeclField() name="{argN}"]]
+    for idx in totalArgs..length(t.argNames)
+        assume argN = t.argNames[idx]
+        var tf <- [[CompletionTypeDeclField() name=length(argN) > 0 ? "{argN}" : "_{idx}"]]
         td.fields |> emplace(tf)
     for idx in totalArgs..length(t.argTypes)
         assume argT = t.argTypes[idx]

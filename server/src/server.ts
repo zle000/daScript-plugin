@@ -88,7 +88,7 @@ connection.onInitialize((params) => {
 		capabilities: {
 			completionProvider: {
 				resolveProvider: false,
-				triggerCharacters: ['.'],
+				triggerCharacters: ['.', ' '],
 			},
 			hoverProvider: true,
 			definitionProvider: true,
