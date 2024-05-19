@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdks, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -339,7 +339,7 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 				for (const prevTdk of prevTdks) {
 					let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
 					if (typeDeclData != null) {
-						const nextTdks = typeDeclItemTdk(typeDeclData, fileData.completion, call.obj)
+						const nextTdks = typeDeclItemTdks(typeDeclData, fileData.completion, call.obj)
 						for (const it of nextTdks)
 							call.tdks.add(it)
 					}
@@ -356,10 +356,11 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 					prevTdks = call.tdks
 					continue
 				}
-				// or bitfield
+				// or bitfield (or alias)
 				let found = false
 				for (const td of fileData.completion.typeDecls) {
-					if (td.baseType == 'bitfield' && td.alias == call.obj) {
+					// if (td.baseType == BaseType.tBitfield && td.alias == call.obj) {
+					if (td.alias == call.obj) {
 						call.tdks.add(td.tdk)
 						found = true
 						break

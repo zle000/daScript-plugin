@@ -421,7 +421,7 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
 }
 
 
-export function typeDeclItemTdk(td: CompletionTypeDecl, cr: CompletionResult, name: string): string[] {
+export function typeDeclItemTdks(td: CompletionTypeDecl, cr: CompletionResult, name: string): string[] {
     let res: string[] = []
     typeDeclIter(td, cr, function (td, st, en) {
         if (st) {
