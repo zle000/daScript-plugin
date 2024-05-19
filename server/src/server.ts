@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdks, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdks, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -128,8 +128,9 @@ interface CallChain {
 }
 
 function findCallChain(fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
-	/// find key foo.key  foo().key  ... etc
-	/// support sequence of calls: foo.key.key2.key3
+	/// find chain of fields access - foo.key or foo().key  ... etc
+	/// support sequences: foo.key.key2.key3
+	/// also support function calls and array/table access: foo().key, foo[0].key, foo().key[0]
 	const doc = documents.get(fileData.uri)
 	if (doc == null)
 		return []
@@ -160,10 +161,11 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		// auto completion or token not found - find it manually
 		for (; i >= 0; i--) {
 			const ch = line[i]
-			if (ch === ' ' || ch === '\t') {
-				del = Delimiter.Space
-				if (key.length === 0)
+			if (isSpaceChar(ch)) {
+				if (key.length === 0) {
+					del = Delimiter.Space
 					continue
+				}
 				break
 			}
 			if (isValidIdChar(ch))
@@ -188,6 +190,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 	if (del === Delimiter.Space && (key == 'as' || key == 'is')) {
 		// skip 'as' 'is' '?as' in case when space is delimiter
 		// `foo as |` - converts to ["foo", ""], not to ["foo", "as"]
+		// `?as` will be also skipped
 		i += key.length
 		key = ''
 		keyRange = Range.create(pos.line, i + 1, pos.line, i + 1)
@@ -196,7 +199,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		// skip spaces
 		for (; i >= 0; i--) {
 			const ch = line[i]
-			if (ch !== ' ' && ch !== '\t')
+			if (!isSpaceChar(ch))
 				break
 		}
 	}
@@ -244,7 +247,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		// skip spaces
 		for (; i >= 0; i--) {
 			const ch = line[i]
-			if (ch !== ' ' && ch !== '\t')
+			if (!isSpaceChar(ch))
 				break
 		}
 		let brackets = Brackets.None
@@ -282,7 +285,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 				// skip spaces
 				for (; i >= 0; i--) {
 					const ch = line[i]
-					if (ch !== ' ' && ch !== '\t')
+					if (!isSpaceChar(ch))
 						break
 				}
 			}

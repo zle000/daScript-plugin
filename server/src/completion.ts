@@ -77,6 +77,10 @@ export function isValidIdChar(ch: string) {
     return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_' || ch === '`'
 }
 
+export function isSpaceChar(ch: string) {
+    return ch === ' ' || ch === '\t'
+}
+
 function modPrefix(mod: string) {
     if (mod.length === 0)
         return ''
