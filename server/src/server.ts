@@ -1,8 +1,6 @@
 
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Hover, MarkupContent, Location, DiagnosticSeverity, SymbolKind, SymbolInformation,
-	Position,
-	DocumentSymbol
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol
 } from 'vscode-languageserver/node'
 
 import {
@@ -15,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclItemTdk, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
