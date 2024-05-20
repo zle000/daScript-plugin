@@ -44,7 +44,7 @@ function debugWsFolders() {
 
 documents.onDidChangeContent((event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
-	validateTextDocument(event.document)
+	updateDocumentData(event.document)
 })
 
 // Only keep settings for open documents
@@ -803,7 +803,7 @@ connection.onDidChangeConfiguration(change => {
 
 	// Revalidate all open text documents
 	// TODO: queue validation
-	documents.all().forEach(validateTextDocument)
+	documents.all().forEach(updateDocumentData)
 })
 
 function getDocumentSettings(resource: string): Thenable<DasSettings> {
@@ -840,9 +840,10 @@ interface ValidatingProcess {
 	promise: Promise<void>
 }
 
+const globalCompletionFile = TextDocument.create('$$$completion$$$.das', 'dascript', 1, '// empty')
 const validatingProcesses = new Map<string, ValidatingProcess>()
 
-async function getDocumentData(uri: string): Promise<FixedValidationResult> {
+async function getDocumentDataRaw(uri: string, doc: TextDocument): Promise<FixedValidationResult> {
 	const data = validatingResults.get(uri)
 	if (data)
 		return data
@@ -852,8 +853,22 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 			return validatingResults.get(uri)
 		})
 	}
-	return validateTextDocument(documents.get(uri)).then(() => {
+	return validateTextDocument(doc).then(() => {
 		return validatingResults.get(uri)
+	})
+}
+
+function updateDocumentData(doc: TextDocument) {
+	getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
+		validateTextDocument(doc)
+	})
+}
+
+async function getDocumentData(uri: string): Promise<FixedValidationResult> {
+	return getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
+		return getDocumentDataRaw(uri, documents.get(uri)).then(() => {
+			return validatingResults.get(uri)
+		})
 	})
 }
 
@@ -907,6 +922,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		args.push('--no-unused-function-arguments')
 	if (settings.policies?.fail_on_lack_of_aot_export)
 		args.push('--fail-on-lack-of-aot-export')
+	if (textDocument == globalCompletionFile)
+		args.push('--global-completion')
 	const workspaceFolder = URI.parse(workspaceFolders![0].uri).fsPath
 	for (const rootName in settings.project.fileAccessRoots) {
 		const fixedRoot = settings.project.fileAccessRoots[rootName].replace('${workspaceFolder}', workspaceFolder)
@@ -915,8 +932,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 	const scriptPath = process.argv[1]
 	const cwd = path.dirname(path.dirname(scriptPath))
-	console.log(`validate ${textDocument.uri} version ${fileVersion}`)
-	console.log('exec cmd', settings.compiler, args.join(' '), 'cwd', cwd)
+	console.log(`> validating ${textDocument.uri} version ${fileVersion}`)
+	console.log('> cwd', cwd)
+	console.log('> exec', settings.compiler, args.join(' '))
 	const vp: ValidatingProcess = { process: null, version: fileVersion, promise: null }
 	validatingProcesses.set(textDocument.uri, vp)
 	const child = spawn(settings.compiler, args, { cwd: cwd })
@@ -939,11 +957,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		})
 		child.on('close', (exitCode: any) => {
 			const validateTextResult = fs.readFileSync(resultFilePath, 'utf8')
-			console.log('remove temp files', tempFilePath, resultFilePath)
+			// console.log('remove temp files', tempFilePath, resultFilePath)
 			fs.rmSync(tempFilePath)
 			fs.rmSync(resultFilePath)
 
-			if (documents.get(textDocument.uri)?.version !== fileVersion) {
+			if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== fileVersion) {
 				console.log('document version changed, ignoring result', textDocument.uri)
 				return
 			}
@@ -982,7 +1000,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 						diagnostics.set(error._uri, [])
 					diagnostics.get(error._uri).push(diag)
 				}
-				storeValidationResult(settings, textDocument.uri, result, exitCode, fileVersion)
+				console.time('storeValidationResult')
+				storeValidationResult(settings, textDocument.uri, result, fileVersion)
+				console.timeEnd('storeValidationResult')
 			} else { // result == null
 				if (!diagnostics.has(textDocument.uri))
 					diagnostics.set(textDocument.uri, [])
@@ -1006,8 +1026,8 @@ function addCompletionItem(map: Array<Map<string, CompletionItem>>, item: Comple
 	while (map.length <= item.kind)
 		map.push(new Map())
 	const items = map[item.kind]
-	if (items.has(item.label)) {
-		const it = items.get(item.label)
+	const it = items.get(item.label)
+	if (it != null) {
 		it.documentation += '\n' + item.documentation
 		return
 	}
@@ -1021,10 +1041,10 @@ function baseTypeToCompletionItemKind(baseType: string) {
 	return CompletionItemKind.Struct
 }
 
-function storeValidationResult(settings: DasSettings, uri: string, res: ValidationResult, exitCode: any, fileVersion: integer) {
+function storeValidationResult(settings: DasSettings, uri: string, res: ValidationResult, fileVersion: integer) {
 	console.log('storeValidationResult', uri)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion }
-	if (res.errors.length > 0 || exitCode !== 0) {
+	if (res.errors.length > 0) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
 		if (prev) {
@@ -1034,6 +1054,18 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 	}
 	else {
+		if (uri != globalCompletionFile.uri) {
+			const globs = validatingResults.get(globalCompletionFile.uri)
+			if (globs) {
+				console.log('>>> merge global completion')
+				fixedResults.completion.structs.unshift(...globs.completion.structs)
+				fixedResults.completion.enums.unshift(...globs.completion.enums)
+				fixedResults.completion.typeDecls.unshift(...globs.completion.typeDecls)
+				fixedResults.completion.typeDefs.unshift(...globs.completion.typeDefs)
+				fixedResults.completion.globals.unshift(...globs.completion.globals)
+				fixedResults.completion.functions.unshift(...globs.completion.functions)
+			}
+		}
 		const map = new Array<Map<string, CompletionItem>>()
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)

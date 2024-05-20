@@ -35,6 +35,7 @@ struct ValidateConfig
     noUnusedBlockArguments : bool
     noUnusedFunctionArguments : bool
     failOnLackOfAotExport : bool
+    globalCompletion : bool
 
     fileAccessRoots : table<string; string>
 
@@ -65,6 +66,7 @@ def main()
     config.noUnusedBlockArguments = args |> has_value("--no-unused-block-arguments")
     config.noUnusedFunctionArguments = args |> has_value("--no-unused-function-arguments")
     config.failOnLackOfAotExport = args |> has_value("--fail-on-lack-of-aot-export")
+    config.globalCompletion = args |> has_value("--global-completion")
 
     var res <- ValidationResult()
     res |> compile(config)
@@ -142,9 +144,13 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                             var inscope completion <- CompletionContext()
                             var processed : table<string>
                             program |> get_ptr() |> for_each_module() <| $(mod)
+                                if !config.globalCompletion && mod |> is_builtin()
+                                    return
                                 completion |> parse_module(mod)
                                 processed |> insert("{mod.name}")
                             program_for_each_registered_module() <| $(mod)
+                                if !config.globalCompletion && mod |> is_builtin()
+                                    return
                                 if !key_exists(processed, "{mod.name}")
                                     completion |> parse_module(mod)
 

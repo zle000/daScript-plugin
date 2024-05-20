@@ -33,6 +33,8 @@ struct CompletionContext
     typeDecls : table<string; int>
     result : CompletionResult
 
+def is_builtin(mod : rtti::Module?) : bool
+    return mod.moduleFlags.builtIn && !mod.moduleFlags.promoted
 
 def to_json(val)
     return val |> sprint_json(/*readable*/true)
