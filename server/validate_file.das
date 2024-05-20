@@ -144,12 +144,12 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                             var inscope completion <- CompletionContext()
                             var processed : table<string>
                             program |> get_ptr() |> for_each_module() <| $(mod)
-                                if !config.globalCompletion && mod |> is_builtin()
+                                if config.globalCompletion != mod |> is_builtin()
                                     return
                                 completion |> parse_module(mod)
                                 processed |> insert("{mod.name}")
                             program_for_each_registered_module() <| $(mod)
-                                if !config.globalCompletion && mod |> is_builtin()
+                                if config.globalCompletion != mod |> is_builtin()
                                     return
                                 if !key_exists(processed, "{mod.name}")
                                     completion |> parse_module(mod)

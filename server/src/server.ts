@@ -1027,7 +1027,7 @@ function addCompletionItem(map: Array<Map<string, CompletionItem>>, item: Comple
 		map.push(new Map())
 	const items = map[item.kind]
 	const it = items.get(item.label)
-	if (it != null) {
+	if (it != null && it.detail == item.detail) {
 		it.documentation += '\n' + item.documentation
 		return
 	}
@@ -1042,8 +1042,8 @@ function baseTypeToCompletionItemKind(baseType: string) {
 }
 
 function storeValidationResult(settings: DasSettings, uri: string, res: ValidationResult, fileVersion: integer) {
-	console.log('storeValidationResult', uri)
-	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion }
+	console.log('storeValidationResult', uri, 'version', fileVersion)
+	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map() }
 	if (res.errors.length > 0) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
@@ -1069,7 +1069,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		const map = new Array<Map<string, CompletionItem>>()
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)
-			e._uri = AtToUri(e, uri, settings, res.dasRoot)
+			e._uri = AtToUri(e, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
 				label: e.name,
 				kind: CompletionItemKind.Enum,
@@ -1094,7 +1094,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			// })
 			for (const ev of e.values) {
 				ev._range = AtToRange(ev)
-				ev._uri = AtToUri(ev, uri, settings, res.dasRoot)
+				ev._uri = AtToUri(ev, uri, settings, res.dasRoot, fixedResults.filesCache)
 				addCompletionItem(map, {
 					label: ev.name,
 					kind: CompletionItemKind.EnumMember,
@@ -1122,7 +1122,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		for (const s of res.completion.structs) {
 			s.column = Math.max(s.column - 5, 0) // magic number to fix column
 			s._range = AtToRange(s)
-			s._uri = AtToUri(s, uri, settings, res.dasRoot)
+			s._uri = AtToUri(s, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
 				label: s.name,
 				kind: s.isClass ? CompletionItemKind.Class : CompletionItemKind.Struct,
@@ -1133,7 +1133,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 				// TODO: search for the field end using textDocument.getText()
 				// sf.columnEnd += sf.tdk.length + 1 // 1 char for ':'
 				sf._range = AtToRange(sf)
-				sf._uri = AtToUri(sf, uri, settings, res.dasRoot)
+				sf._uri = AtToUri(sf, uri, settings, res.dasRoot, fixedResults.filesCache)
 				addCompletionItem(map, {
 					label: sf.name,
 					kind: CompletionItemKind.Field,
@@ -1144,7 +1144,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const t of res.completion.typeDecls) {
 			t._range = AtToRange(t)
-			t._uri = AtToUri(t, uri, settings, res.dasRoot)
+			t._uri = AtToUri(t, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
 				label: t.tdk,
 				kind: baseTypeToCompletionItemKind(t.baseType),
@@ -1162,7 +1162,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const t of res.completion.typeDefs) {
 			t._range = AtToRange(t)
-			t._uri = AtToUri(t, uri, settings, res.dasRoot)
+			t._uri = AtToUri(t, uri, settings, res.dasRoot, fixedResults.filesCache)
 			const valueType = res.completion.typeDecls.find(td => td.tdk === t.tdk)
 			addCompletionItem(map, {
 				label: t.name,
@@ -1173,7 +1173,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const g of res.completion.globals) {
 			g._range = AtToRange(g)
-			g._uri = AtToUri(g, uri, settings, res.dasRoot)
+			g._uri = AtToUri(g, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
 				label: g.name,
 				kind: CompletionItemKind.Variable,
@@ -1183,9 +1183,9 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		}
 		for (const f of res.completion.functions) {
 			f._range = AtToRange(f)
-			f._uri = AtToUri(f, uri, settings, res.dasRoot)
+			f._uri = AtToUri(f, uri, settings, res.dasRoot, fixedResults.filesCache)
 			f.decl._range = AtToRange(f.decl)
-			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot)
+			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
 				label: f.name,
 				kind: CompletionItemKind.Function,
@@ -1194,7 +1194,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			})
 			for (const arg of f.args) {
 				arg._range = AtToRange(arg)
-				arg._uri = AtToUri(arg, uri, settings, res.dasRoot)
+				arg._uri = AtToUri(arg, uri, settings, res.dasRoot, fixedResults.filesCache)
 				addCompletionItem(map, {
 					label: arg.name,
 					kind: CompletionItemKind.Variable,
@@ -1208,7 +1208,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 		fixedResults.tokens = []
 
 		for (const token of tokens) {
-			token._uri = AtToUri(token, uri, settings, res.dasRoot)
+			token._uri = AtToUri(token, uri, settings, res.dasRoot, fixedResults.filesCache)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
 			if (token.kind == TokenKind.ExprField)
@@ -1217,7 +1217,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			// declAt is negative for tokens that are not declared in the source code
 			if (token.declAt.line >= 0) {
 				token.declAt._range = AtToRange(token.declAt)
-				token.declAt._uri = AtToUri(token.declAt, uri, settings, res.dasRoot)
+				token.declAt._uri = AtToUri(token.declAt, uri, settings, res.dasRoot, fixedResults.filesCache)
 			}
 			else {
 				token.declAt._range = Range.create(0, 0, 0, 0)

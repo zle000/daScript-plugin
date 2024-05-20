@@ -601,10 +601,22 @@ export interface ValidationResult {
     dasRoot: string
 }
 
-export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string) {
+export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string, cache: Map<string, string> = null) {
     if (at.file?.length == 0)
         return ''
 
+    if (cache && cache.has(at.file)) {
+        return cache.get(at.file)
+    }
+
+    const res = AtToUri_(at, documentUri, settings, dasRoot)
+    if (cache) {
+        cache.set(at.file, res)
+    }
+    return res
+}
+
+function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string) {
     if (fs.existsSync(at.file)) {
         return URI.file(at.file).toString()
     }
@@ -640,6 +652,7 @@ export interface FixedValidationResult extends ValidationResult {
     uri: string
     fileVersion: integer
     completionItems: CompletionItem[]
+    filesCache: Map<string, string>
 }
 
 export function posInRange(pos: Position, range: Range) {
