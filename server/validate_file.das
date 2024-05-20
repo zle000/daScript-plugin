@@ -39,7 +39,7 @@ struct ValidateConfig
     fileAccessRoots : table<string; string>
 
 let WRITE_RESULT = true
-let WRITE_RESULT_TO_FILE = true
+let WRITE_RESULT_TO_FILE = false
 
 [export]
 def main()

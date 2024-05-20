@@ -949,16 +949,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			}
 
 			// console.log(validateTextResult)
-			let result: ValidationResult
+			let result: ValidationResult = null
 			try {
-				result = JSON.parse(validateTextResult) as ValidationResult
+				if (validateTextResult.length > 0)
+					result = JSON.parse(validateTextResult) as ValidationResult
 			}
 			catch (e) {
 				console.log('failed to parse result', e)
 				console.log('"""', validateTextResult, '"""')
-				if (exitCode === 0)
-					diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: failed to parse validation result. Please report this issue.` })
-				return
 			}
 			// console.log(result) // TODO: remove this log
 			if (result != null) {
@@ -985,9 +983,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					diagnostics.get(error._uri).push(diag)
 				}
 				storeValidationResult(settings, textDocument.uri, result, exitCode, fileVersion)
+			} else { // result == null
+				if (!diagnostics.has(textDocument.uri))
+					diagnostics.set(textDocument.uri, [])
+				diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}.` })
 			}
-			if (exitCode !== 0 && diagnostics.get(textDocument.uri).length === 0) {
-				diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}, but no errors were reported. Please report this issue.` })
+			if (exitCode !== 0 || result == null) {
 				console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
 				console.log('"""', output, '"""')
 			}
@@ -1021,6 +1022,7 @@ function baseTypeToCompletionItemKind(baseType: string) {
 }
 
 function storeValidationResult(settings: DasSettings, uri: string, res: ValidationResult, exitCode: any, fileVersion: integer) {
+	console.log('storeValidationResult', uri)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion }
 	if (res.errors.length > 0 || exitCode !== 0) {
 		// keep previous completion items

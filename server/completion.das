@@ -10,7 +10,7 @@ require completion_boost
 require fio
 
 let WRITE_RESULT = false
-let WRITE_RESULT_TO_FILE = true
+let WRITE_RESULT_TO_FILE = false
 
 [export]
 def main()
