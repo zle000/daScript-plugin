@@ -1,11 +1,14 @@
 {
     "typescript.preferences.quoteStyle": "single",
     "cSpell.words": [
+        "cerr",
         "dascript",
         "daslib",
         "debugapi",
         "rtti",
         "struct",
+        "tdks",
+        "Typedecl",
         "uriparser"
     ],
     "typescript.inlayHints.variableTypes.enabled": true,

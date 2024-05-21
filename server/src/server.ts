@@ -138,17 +138,18 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 	let key = ''
 	let keyRange: Range
 	let i = line.length - 1
-	let toks: DasToken[] = []
+	let tokens: DasToken[] = []
 	let del = Delimiter.None
 	if (!forAutocompletion) {
 		// lets try to find token under cursor
-		const cursorToks = findTokensUnderCursor(fileData, pos)
-		if (cursorToks.length > 0) {
-			for (const cursorTok of cursorToks) {
+		const cursorTokens = findTokensUnderCursor(fileData, pos)
+		if (cursorTokens.length > 0) {
+			for (const cursorTok of cursorTokens) {
 				const currentText = doc.getText(cursorTok._range)
+				////
 				// TODO: check if token name is in the current text
 				if (currentText.trim().length > 0) {
-					toks.push(cursorTok)
+					tokens.push(cursorTok)
 					key = cursorTok.name
 					keyRange = cursorTok._range
 					i = doc.offsetAt(cursorTok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
@@ -158,7 +159,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		}
 	}
 
-	if (forAutocompletion || toks.length === 0) {
+	if (forAutocompletion || tokens.length === 0) {
 		// auto completion or token not found - find it manually
 		for (; i >= 0; i--) {
 			const ch = line[i]
@@ -204,7 +205,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 				break
 		}
 	}
-	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: toks, tdks: new Set(toks.map(it => it.tdk)), delimiter: del, brackets: Brackets.None }
+	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: tokens, tdks: new Set(tokens.map(it => it.tdk)), delimiter: del, brackets: Brackets.None }
 
 	let res: CallChain[] = [keyData]
 	while (i > 0) {
@@ -335,10 +336,10 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			continue
 		}
 		if (idx == 1) {
-			const toks = call.tokens.length > 0 ? call.tokens : findTokensAt(fileData, call)
-			if (toks.length > 0) {
-				call.tokens = toks
-				call.tdks = new Set(toks.map(it => it.tdk))
+			const tokens = call.tokens.length > 0 ? call.tokens : findTokensAt(fileData, call)
+			if (tokens.length > 0) {
+				call.tokens = tokens
+				call.tdks = new Set(tokens.map(it => it.tdk))
 				prevTdks = call.tdks
 				continue
 			}
