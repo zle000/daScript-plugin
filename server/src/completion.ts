@@ -542,6 +542,12 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                 resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
         }
     }
+    if (delimiter == Delimiter.Is) {
+        const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tBool)
+        if (td2)
+            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+    }
+
     return resultTd
 }
 

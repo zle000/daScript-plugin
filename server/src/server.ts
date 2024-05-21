@@ -137,24 +137,19 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 	let i = line.length - 1
 	let tokens: DasToken[] = []
 	let del = Delimiter.None
-	if (!forAutocompletion) {
-		// lets try to find token under cursor
-		const cursorTokens = findTokensUnderCursor(fileData, pos)
-		if (cursorTokens.length > 0) {
-			for (const cursorTok of cursorTokens) {
-				const currentText = doc.getText(cursorTok._range)
-				if (currentText == cursorTok._originalText) {
-					tokens.push(cursorTok)
-					key = cursorTok.name
-					keyRange = cursorTok._range
-					i = doc.offsetAt(cursorTok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
-					break
-				}
-			}
-		}
+	// if (!forAutocompletion) {
+	// lets try to find token under cursor
+	const cursorTokens = findTokensUnderCursor(doc, fileData, pos)
+	for (const cursorTok of cursorTokens) {
+		tokens.push(cursorTok)
+		key = cursorTok.name
+		keyRange = cursorTok._range
+		i = doc.offsetAt(cursorTok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
 	}
+	// }
 
-	if (forAutocompletion || tokens.length === 0) {
+	// if (forAutocompletion || tokens.length === 0) {
+	if (tokens.length === 0) {
 		// auto completion or token not found - find it manually
 		for (; i >= 0; i--) {
 			const ch = line[i]
@@ -299,15 +294,20 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 				break
 		}
 		if (obj.length === 0) { break }
+		if (del === Delimiter.Space && i >= 0 && isSpaceChar(line[i]) && (obj == 'as' || obj == 'is' || obj == '?as')) {
+			// skip 'as' 'is' '?as' in case when space is delimiter and next char is space
+			i += obj.length // move back to beginning of the word
+			continue
+		}
 		const objRange = Range.create(pos.line, i + 1, pos.line, tokenEnd)
 		res.unshift({ obj: obj, objRange: objRange, tokens: [], tdks: new Set(), delimiter: del, brackets: brackets })
 	}
 
-	resolveChainTdk(fileData, res, !forAutocompletion)
+	resolveChainTdk(doc, fileData, res, !forAutocompletion)
 	return res
 }
 
-function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[], forAutocompletion: boolean): void {
+function resolveChainTdk(doc: TextDocument, fileData: FixedValidationResult, callChain: CallChain[], forAutocompletion: boolean): void {
 	if (callChain.length === 0)
 		return
 	const last = callChain[callChain.length - 1]
@@ -332,6 +332,19 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 			prevTdks = call.tdks
 			continue
 		}
+		const cursorTokens = findTokensUnderCursor(doc, fileData, call.objRange.start)
+		if (cursorTokens.length > 0) {
+			for (const cursorTok of cursorTokens) {
+				if (call.obj == cursorTok._originalText) {
+					call.tokens.push(cursorTok)
+					call.tdks.add(cursorTok.tdk)
+				}
+			}
+			if (call.tokens.length > 0) {
+				prevTdks = call.tdks
+				continue
+			}
+		}
 		if (idx == 1) {
 			const tokens = call.tokens.length > 0 ? call.tokens : findTokensAt(fileData, call)
 			if (tokens.length > 0) {
@@ -353,8 +366,12 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 						// 	call.tdks.add(nextTdks.tdk)
 						// }
 						for (const it of next) {
-							if (it.label == call.obj)
-								call.tdks.add(it.data)
+							if (it.label == call.obj) {
+								if (prevDelimiter == Delimiter.Is)
+									call.tdks.add(BaseType.tBool)
+								else
+									call.tdks.add(it.data)
+							}
 						}
 					}
 				}
@@ -421,10 +438,10 @@ function findTokensAt(fileData: FixedValidationResult, call: CallChain): DasToke
 	return exactName != null ? [exactName] : []
 }
 
-function findTokensUnderCursor(fileData: FixedValidationResult, position: Position): DasToken[] {
+function findTokensUnderCursor(doc: TextDocument, fileData: FixedValidationResult, position: Position): DasToken[] {
 	let res: DasToken[] = []
 	for (const tok of fileData.tokens) {
-		if (tok._uri == fileData.uri && posInRange(position, tok._range)) {
+		if (tok._uri == fileData.uri && posInRange(position, tok._range) && tok._originalText == doc.getText(tok._range)) {
 			res.push(tok)
 		}
 	}
