@@ -218,12 +218,6 @@ def cleanupTDK(res : string) : string
 def TypeDeclKey(t : smart_ptr<ast::TypeDecl>&)
     return t |> describe_typedecl(false, false, true) |> cleanupTDK()
 
-def TypeDeclKey(t : TypeInfo&)
-    return unsafe(addr(t)) |> describe() |> cleanupTDK()
-
-// def TypeDeclString(t : smart_ptr<ast::TypeDecl>&)
-//     return t |> describe_typedecl(true, true, true)
-
 struct CompletionTypeDeclField
     name : string
     tdk : string
@@ -359,10 +353,10 @@ def parse_annotation(var res : CompletionContext; ann : Annotation&)
         var st <- [[CompletionStruct() name="{sann.name}"]]
         if ann._module != null
             st.mod = ann._module.name |> string()
-        basic_struct_for_each_field(sann) <| $[unused_argument(cppName)](name, cppName, xtype, offset)
+        for_each_field(sann) <| $[unused_argument(cppName)](name, cppName, xtype, offset)
             var field <- [[CompletionStructField() name="{name}"]]
             field.tdk = TypeDeclKey(xtype)
-            // res |> parse_typedecl(field.tdk, xtype)
+            res |> parse_typedecl(field.tdk, xtype)
             field.offset = int(offset)
             st.fields |> emplace(field)
         res.result.structs |> emplace(st)
@@ -402,7 +396,7 @@ def parse_module(var res : CompletionContext; mod : rtti::Module?)
 
     var inscope funcCppNames : table<string; string>
     mod |> module_for_each_function() <| $(f)
-        funcCppNames[f.name] = f.cppName
+        funcCppNames[f.name] = clone_string(f.cppName)
 
     mod |> for_each_generic() <| $(f)
         // debug(f)

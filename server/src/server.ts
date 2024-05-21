@@ -350,9 +350,9 @@ function resolveChainTdk(fileData: FixedValidationResult, callChain: CallChain[]
 					if (typeDeclData != null) {
 						var next: CompletionItem[] = []
 						const nextTdks = typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
-						if (nextTdks.tdk != prevTdk) {
-							call.tdks.add(nextTdks.tdk)
-						}
+						// if (nextTdks.tdk != prevTdk) {
+						// 	call.tdks.add(nextTdks.tdk)
+						// }
 						for (const it of next) {
 							if (it.label == call.obj)
 								call.tdks.add(it.data)
