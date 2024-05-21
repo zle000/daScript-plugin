@@ -1,6 +1,6 @@
 
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit,
 } from 'vscode-languageserver/node'
 
 import {
@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -86,7 +86,7 @@ connection.onInitialize((params) => {
 		capabilities: {
 			completionProvider: {
 				resolveProvider: false,
-				triggerCharacters: ['.', ' '],
+				triggerCharacters: ['.', ' ', '>'],
 			},
 			hoverProvider: true,
 			definitionProvider: true,
@@ -127,13 +127,10 @@ interface CallChain {
 	brackets: Brackets
 }
 
-function findCallChain(fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
+function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
 	/// find chain of fields access - foo.key or foo().key  ... etc
 	/// support sequences: foo.key.key2.key3
 	/// also support function calls and array/table access: foo().key, foo[0].key, foo().key[0]
-	const doc = documents.get(fileData.uri)
-	if (doc == null)
-		return []
 	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
 	let key = ''
 	let keyRange: Range
@@ -210,17 +207,17 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		del = Delimiter.None
 		// '.' ' ' '?.' '->' 'as' 'is' '?as' '|>'
 
-		if (line[i] === '.') {
-			i -= 1
-			del = Delimiter.Dot
-		}
-		else if (line[i] === ' ') {
+		if (line[i] === ' ') {
 			i -= 1
 			del = Delimiter.Space
 		}
 		else if (i > 0 && line[i] === '.' && line[i - 1] === '?') {
 			i -= 2
 			del = Delimiter.QuestionDot
+		}
+		else if (line[i] === '.') {
+			i -= 1
+			del = Delimiter.Dot
 		}
 		else if (i > 0 && line[i] === '>' && line[i - 1] === '-') {
 			i -= 2
@@ -433,14 +430,54 @@ function findTokensUnderCursor(fileData: FixedValidationResult, position: Positi
 	return res
 }
 
+function repeat(ch: string, num: number) {
+	let res = ''
+	for (let i = 0; i < num; i++)
+		res += ch
+	return res
+}
+
+function fixCompletionSelf(c: CompletionItem, replaceStart: Position, cursorPos: Position): void {
+	if (c.insertText != null) {
+		fixCompletion(c, c.insertText, replaceStart, cursorPos)
+		c.insertText = undefined
+	}
+}
+
+function fixCompletion(c: CompletionItem, newText: string, replaceStart: Position, cursorPos: Position): void {
+	const insertRange = Range.create(replaceStart, Position.create(replaceStart.line, replaceStart.character + newText.length))
+	const delRange = Range.create(insertRange.start, cursorPos)
+	if (posInRange(cursorPos, insertRange)) {
+		// is enough to replace only part of the text, split text in 2 parts
+		const delLen = rangeLength(delRange)
+		c.additionalTextEdits = [TextEdit.replace(delRange, newText.substring(0, delLen))]
+		c.textEdit = TextEdit.insert(cursorPos, newText.substring(delLen))
+	} else {
+		// text is too short, fully replace prefix part and just insert text as is
+		c.additionalTextEdits = [TextEdit.replace(delRange, repeat(' ', rangeLength(delRange)))]
+		c.textEdit = TextEdit.insert(cursorPos, newText)
+	}
+}
+
+const operators = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
+"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
+">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", "`is", "`as", "?as",
+":=", "<-",]
+
 connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
-	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/true)
+	if (!fileData)
+		return null
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	if (callChain.length === 0)
 		return fileData.completionItems
 
 	const res: CompletionItem[] = []
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
+	const replaceStart = call.objRange.end
 	for (const completionTdk of call.tdks) {
 		let actualTdk = completionTdk
 		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
@@ -448,6 +485,10 @@ connection.onCompletion(async (textDocumentPosition) => {
 			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
 			if (resTd.tdk.length > 0)
 				actualTdk = resTd.tdk
+		}
+
+		for (let it of res) {
+			fixCompletionSelf(it, replaceStart, textDocumentPosition.position)
 		}
 
 		if (actualTdk.length > 0 && (call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
@@ -461,7 +502,9 @@ connection.onCompletion(async (textDocumentPosition) => {
 					const c = CompletionItem.create(fn.name)
 					c.detail = funcDetail(fn)
 					c.documentation = funcDocs(fn)
-					c.kind = CompletionItemKind.Function
+					c.kind = CompletionItemKind.Operator // always use operator for functions to show different icon for them
+					const isOperator = operators.includes(fn.name)
+					fixCompletion(c, isOperator ? ` ${fn.name} ` : ` |> ${fn.name}(`, replaceStart, textDocumentPosition.position)
 					res.push(c)
 				}
 			}
@@ -474,7 +517,10 @@ connection.onHover(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return null
-	const callChain = findCallChain(fileData, textDocumentPosition.position, /*forAutocompletion*/false)
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/false)
 	if (callChain.length === 0)
 		return null
 	// console.log(JSON.stringify(callChain))
@@ -557,7 +603,10 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const callChain = findCallChain(fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
 	if (callChain.length === 0)
 		return null
 	const last = callChain[callChain.length - 1]
@@ -593,7 +642,10 @@ connection.onReferences(async (referencesParams) => {
 	const fileData = await getDocumentData(referencesParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const callChain = findCallChain(fileData, referencesParams.position, /*forAutocompletion*/false)
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, referencesParams.position, /*forAutocompletion*/false)
 	if (callChain.length === 0)
 		return null
 	const last = callChain[callChain.length - 1]
@@ -610,7 +662,10 @@ connection.onDefinition(async (declarationParams) => {
 	const fileData = await getDocumentData(declarationParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const callChain = findCallChain(fileData, declarationParams.position, /*forAutocompletion*/false)
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, declarationParams.position, /*forAutocompletion*/false)
 	if (callChain.length === 0)
 		return null
 	let res: Location[] = []
@@ -959,6 +1014,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			// console.log('remove temp files', tempFilePath, resultFilePath)
 			fs.rmSync(tempFilePath)
 			fs.rmSync(resultFilePath)
+
+			if (exitCode === null) {
+				console.log('Validation process exited with code', exitCode)
+				return
+			}
 
 			if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
 				console.log('document version changed, ignoring result', textDocument.uri)

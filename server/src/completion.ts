@@ -148,7 +148,7 @@ export interface CompletionAt {
 
     _range: Range
     _uri: string
-    _originalText : string
+    _originalText: string
 }
 
 export function addValidLocation(res: Location[], at: CompletionAt): void {
@@ -428,18 +428,27 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
 // returns actual CompletionTypeDecl
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
     let resultTd = td
+    const dotDel = delimiter == Delimiter.Dot
+    const qDotDel = delimiter == Delimiter.QuestionDot
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0 && brackets != Brackets.Square) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st) {
-            st.fields.forEach(f => {
-                // TODO: show fields only when delimiter is dot, show functions only when delimiter is arrow or auto transform completion text
-                const c = CompletionItem.create(f.name)
-                c.kind = CompletionItemKind.Field
-                c.detail = structFieldDetail(f)
-                c.documentation = structFieldDocs(f, st)
-                c.data = f.tdk
-                res.push(c)
-            })
+            const onlyFunctions = delimiter == Delimiter.Arrow
+            if (onlyFunctions || dotDel || qDotDel)
+                st.fields.forEach(f => {
+                    const td = cr.typeDecls.find(t => t.tdk === f.tdk)
+                    const isFunction = td && td.baseType === BaseType.tFunction
+                    if (onlyFunctions && !isFunction)
+                        return
+                    const c = CompletionItem.create(f.name)
+                    if (onlyFunctions)
+                        c.insertText = `->${f.name}(`
+                    c.kind = isFunction ? CompletionItemKind.Method : CompletionItemKind.Field
+                    c.detail = structFieldDetail(f)
+                    c.documentation = structFieldDocs(f, st)
+                    c.data = f.tdk
+                    res.push(c)
+                })
         }
         else
             console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
@@ -471,7 +480,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     if ((td.baseType === BaseType.tPointer || ((td.baseType === BaseType.tArray || td.dim.length > 0) && brackets == Brackets.Square)) && td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
-            resultTd = typeDeclCompletion(td1, cr, Delimiter.None, Brackets.None, res)
+            resultTd = typeDeclCompletion(td1, cr, delimiter, Brackets.None, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
@@ -479,52 +488,58 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     if (td.baseType === BaseType.tTable && brackets == Brackets.Square && td.dim.length == 0 && td.tdk1.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
-            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+            resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
     // return td
-    const asIs = delimiter == Delimiter.As || delimiter == Delimiter.Is || delimiter == Delimiter.QuestionAs
-    if (asIs == (resultTd.baseType === BaseType.tVariant) && resultTd.dim.length == 0) {
-        resultTd.fields.forEach(f => {
 
+    if (delimiter != Delimiter.Arrow && delimiter != Delimiter.Pipe && resultTd.dim.length == 0) {
+        const isVariant = resultTd.baseType === BaseType.tVariant
+        resultTd.fields.forEach(f => {
             const c = CompletionItem.create(f.name)
+            if (isVariant) {
+                if (dotDel)
+                    c.insertText = ` as ${f.name}`
+                else if (qDotDel)
+                    c.insertText = ` ?as ${f.name}`
+            }
             c.kind = CompletionItemKind.Field
             c.detail = typeDeclFieldDetail(f)
             c.documentation = typeDeclFieldDocs(f, resultTd)
             c.data = f.tdk
             res.push(c)
         })
-    }
-    if (td.baseType == BaseType.tFloat2 || td.baseType == BaseType.tFloat3 || td.baseType == BaseType.tFloat4
-        || td.baseType == BaseType.tInt2 || td.baseType == BaseType.tInt3 || td.baseType == BaseType.tInt4 || td.baseType == BaseType.tRange
-        || td.baseType == BaseType.tUInt2 || td.baseType == BaseType.tUInt3 || td.baseType == BaseType.tUInt4 || td.baseType == BaseType.tURange
-    ) {
-        let dim = td.baseType.endsWith('4') ? 4 : td.baseType.endsWith('3') ? 3 : 2
-        let type = td.baseType.startsWith('f') ? BaseType.tFloat : td.baseType.startsWith('u') ? BaseType.tUInt : BaseType.tInt
-        if (brackets != Brackets.Square) {
-            const fieldsStr = 'xyzw'
-            for (let i = 0; i < dim; i++) {
-                const c = CompletionItem.create(fieldsStr.charAt(i))
-                c.kind = CompletionItemKind.Field
-                c.detail = `${c.label} : ${type}`
-                c.data = type
-                res.push(c)
+        if (td.baseType == BaseType.tFloat2 || td.baseType == BaseType.tFloat3 || td.baseType == BaseType.tFloat4
+            || td.baseType == BaseType.tInt2 || td.baseType == BaseType.tInt3 || td.baseType == BaseType.tInt4 || td.baseType == BaseType.tRange
+            || td.baseType == BaseType.tUInt2 || td.baseType == BaseType.tUInt3 || td.baseType == BaseType.tUInt4 || td.baseType == BaseType.tURange
+        ) {
+            let dim = td.baseType.endsWith('4') ? 4 : td.baseType.endsWith('3') ? 3 : 2
+            let type = td.baseType.startsWith('f') ? BaseType.tFloat : td.baseType.startsWith('u') ? BaseType.tUInt : BaseType.tInt
+            if (brackets != Brackets.Square) {
+                const fieldsStr = 'xyzw'
+                for (let i = 0; i < dim; i++) {
+                    const c = CompletionItem.create(fieldsStr.charAt(i))
+                    c.kind = CompletionItemKind.Field
+                    c.detail = `${c.label} : ${type}`
+                    c.data = type
+                    res.push(c)
+                }
             }
+            const td2 = cr.typeDecls.find(t => t.tdk === type)
+            if (td2)
+                resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
         }
-        const td2 = cr.typeDecls.find(t => t.tdk === type)
-        if (td2)
-            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
-    }
-    else if (td.baseType == BaseType.tRange64) {
-        const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tInt64)
-        if (td2)
-            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
-    }
-    else if (td.baseType == BaseType.tURange64) {
-        const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
-        if (td2)
-            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+        else if (td.baseType == BaseType.tRange64) {
+            const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tInt64)
+            if (td2)
+                resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+        }
+        else if (td.baseType == BaseType.tURange64) {
+            const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
+            if (td2)
+                resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+        }
     }
     return resultTd
 }
@@ -665,6 +680,10 @@ export function rangeCenter(range: Range): Position {
         Math.round((range.start.line + range.end.line) / 2),
         Math.round((range.start.character + range.end.character) / 2)
     )
+}
+
+export function rangeLength(range: Range) {
+    return (range.end.character - range.start.character)
 }
 
 export function isRangeLess(a: Range, b: Range) {
