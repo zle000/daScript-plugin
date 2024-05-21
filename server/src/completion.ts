@@ -443,10 +443,11 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                     const c = CompletionItem.create(f.name)
                     if (onlyFunctions)
                         c.insertText = `->${f.name}(`
-                    c.kind = isFunction ? CompletionItemKind.Method : CompletionItemKind.Field
+                    c.kind = isFunction ? CompletionItemKind.Reference : CompletionItemKind.Field
                     c.detail = structFieldDetail(f)
                     c.documentation = structFieldDocs(f, st)
                     c.data = f.tdk
+                    c.sortText = !isFunction ? '0' : '1'
                     res.push(c)
                 })
         }
@@ -494,9 +495,9 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     }
     // return td
 
-    if (delimiter != Delimiter.Arrow && delimiter != Delimiter.Pipe && resultTd.dim.length == 0) {
-        const isVariant = resultTd.baseType === BaseType.tVariant
-        resultTd.fields.forEach(f => {
+    if (delimiter != Delimiter.Arrow && delimiter != Delimiter.Pipe && td.dim.length == 0) {
+        const isVariant = td.baseType === BaseType.tVariant
+        td.fields.forEach(f => {
             const c = CompletionItem.create(f.name)
             if (isVariant) {
                 if (dotDel)
@@ -506,7 +507,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             }
             c.kind = CompletionItemKind.Field
             c.detail = typeDeclFieldDetail(f)
-            c.documentation = typeDeclFieldDocs(f, resultTd)
+            c.documentation = typeDeclFieldDocs(f, td)
             c.data = f.tdk
             res.push(c)
         })

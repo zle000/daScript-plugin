@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -247,6 +247,8 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 			if (!isSpaceChar(ch))
 				break
 		}
+		let tokenEnd = i + 1 // token + brackets
+
 		let brackets = Brackets.None
 		if (i >= 0) {
 			brackets = line[i] === ')' ? Brackets.Round : line[i] === ']' ? Brackets.Square : Brackets.None
@@ -297,7 +299,7 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 				break
 		}
 		if (obj.length === 0) { break }
-		const objRange = Range.create(pos.line, i + 1, pos.line, i + 1 + obj.length)
+		const objRange = Range.create(pos.line, i + 1, pos.line, tokenEnd)
 		res.unshift({ obj: obj, objRange: objRange, tokens: [], tdks: new Set(), delimiter: del, brackets: brackets })
 	}
 
@@ -460,9 +462,9 @@ function fixCompletion(c: CompletionItem, newText: string, replaceStart: Positio
 }
 
 const operators = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
-"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
-">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", "`is", "`as", "?as",
-":=", "<-",]
+	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
+	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", "`is", "`as", "?as",
+	":=", "<-",]
 
 connection.onCompletion(async (textDocumentPosition) => {
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
@@ -502,9 +504,10 @@ connection.onCompletion(async (textDocumentPosition) => {
 					const c = CompletionItem.create(fn.name)
 					c.detail = funcDetail(fn)
 					c.documentation = funcDocs(fn)
-					c.kind = CompletionItemKind.Operator // always use operator for functions to show different icon for them
 					const isOperator = operators.includes(fn.name)
+					c.kind = isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
 					fixCompletion(c, isOperator ? ` ${fn.name} ` : ` |> ${fn.name}(`, replaceStart, textDocumentPosition.position)
+					c.sortText = isOperator ? '3' : '2'
 					res.push(c)
 				}
 			}
@@ -708,6 +711,19 @@ connection.onDefinition(async (declarationParams) => {
 				if (td.tdk === parentTdk) {
 					// TODO: find pos for field tdk.name
 					const pos = typeDeclDefinition(td, fileData.completion)
+					addValidLocation(res, pos)
+				}
+			}
+		}
+	}
+	if (last.tokens.length === 0) {
+		const prev = callChain.length > 1 ? callChain[callChain.length - 2] : null
+		if (prev) {
+			for (const tdk of prev.tdks) {
+				const typeDecl = fileData.completion.typeDecls.find(td => td.tdk === tdk)
+				if (typeDecl) {
+					// TODO: find pos for field tdk.name
+					const pos = typeDeclDefinition(typeDecl, fileData.completion)
 					addValidLocation(res, pos)
 				}
 			}
