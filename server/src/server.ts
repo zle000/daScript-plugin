@@ -146,12 +146,13 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		if (cursorToks.length > 0) {
 			for (const cursorTok of cursorToks) {
 				const currentText = doc.getText(cursorTok._range)
-				// check if token name is in the current text
-				if (cursorTok.name.indexOf(currentText) >= 0 || currentText.indexOf(cursorTok.name) >= 0) {
+				// TODO: check if token name is in the current text
+				if (currentText.trim().length > 0) {
 					toks.push(cursorTok)
 					key = cursorTok.name
 					keyRange = cursorTok._range
 					i = doc.offsetAt(cursorTok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
+					break
 				}
 			}
 		}
