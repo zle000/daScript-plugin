@@ -146,9 +146,7 @@ function findCallChain(fileData: FixedValidationResult, pos: Position, forAutoco
 		if (cursorTokens.length > 0) {
 			for (const cursorTok of cursorTokens) {
 				const currentText = doc.getText(cursorTok._range)
-				////
-				// TODO: check if token name is in the current text
-				if (currentText.trim().length > 0) {
+				if (currentText == cursorTok._originalText) {
 					tokens.push(cursorTok)
 					key = cursorTok.name
 					keyRange = cursorTok._range
@@ -892,7 +890,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		console.log('document version not changed, ignoring', textDocument.uri)
 		return Promise.resolve()
 	}
-	const fileVersion = textDocument.version
 	const settings = await getDocumentSettings(textDocument.uri)
 
 	const filePath = URI.parse(textDocument.uri).fsPath
@@ -934,10 +931,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 	const scriptPath = process.argv[1]
 	const cwd = path.dirname(path.dirname(scriptPath))
-	console.log(`> validating ${textDocument.uri} version ${fileVersion}`)
+	console.log(`> validating ${textDocument.uri} version ${textDocument.version}`)
 	console.log('> cwd', cwd)
 	console.log('> exec', settings.compiler, args.join(' '))
-	const vp: ValidatingProcess = { process: null, version: fileVersion, promise: null }
+	const vp: ValidatingProcess = { process: null, version: textDocument.version, promise: null }
 	validatingProcesses.set(textDocument.uri, vp)
 	const child = spawn(settings.compiler, args, { cwd: cwd })
 	vp.process = child
@@ -963,7 +960,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			fs.rmSync(tempFilePath)
 			fs.rmSync(resultFilePath)
 
-			if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== fileVersion) {
+			if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
 				console.log('document version changed, ignoring result', textDocument.uri)
 				return
 			}
@@ -1003,7 +1000,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					diagnostics.get(error._uri).push(diag)
 				}
 				console.time('storeValidationResult')
-				storeValidationResult(settings, textDocument.uri, result, fileVersion)
+				storeValidationResult(settings, textDocument, result)
 				console.timeEnd('storeValidationResult')
 			} else { // result == null
 				if (!diagnostics.has(textDocument.uri))
@@ -1043,7 +1040,9 @@ function baseTypeToCompletionItemKind(baseType: string) {
 	return CompletionItemKind.Struct
 }
 
-function storeValidationResult(settings: DasSettings, uri: string, res: ValidationResult, fileVersion: integer) {
+function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult) {
+	const uri = doc.uri
+	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map() }
 	if (res.errors.length > 0) {
@@ -1216,6 +1215,7 @@ function storeValidationResult(settings: DasSettings, uri: string, res: Validati
 			if (token.kind == TokenKind.ExprField)
 				token.columnEnd += token.name.length
 			token._range = AtToRange(token)
+			token._originalText = doc.getText(token._range)
 			// declAt is negative for tokens that are not declared in the source code
 			if (token.declAt.line >= 0) {
 				token.declAt._range = AtToRange(token.declAt)

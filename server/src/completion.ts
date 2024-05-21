@@ -148,6 +148,7 @@ export interface CompletionAt {
 
     _range: Range
     _uri: string
+    _originalText : string
 }
 
 export function addValidLocation(res: Location[], at: CompletionAt): void {
