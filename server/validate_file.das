@@ -196,6 +196,8 @@ struct DasToken : CompletionAt
     parentTdk : string
     isUnused : bool
     isConst : bool
+    // ptr : uint64
+
 
 def DasToken(expr; var completion : CompletionContext?) : DasToken
     var token = DasToken()
@@ -205,12 +207,14 @@ def DasToken(expr; var completion : CompletionContext?) : DasToken
         token.isConst = expr._type.flags.constant
         *completion |> parse_typedecl(token.tdk, expr._type)
     token |> fill_at(expr.at)
+    // token.ptr = intptr(expr |> get_ptr())
     return token
 
 class AstData : AstVisitor
     [[do_not_delete]] res : ValidationResult?
     [[do_not_delete]] completion : CompletionContext?
-    skipExprs : bool = false
+    skipExprs : array<bool>
+    visitedExprs : table<uint64>
     // def override preVisitFunction(fun:FunctionPtr) : void
     //     debug(fun)
     // def override preVisitExprTypeDecl(expr:smart_ptr<ExprTypeDecl>) : void
@@ -248,7 +252,7 @@ class AstData : AstVisitor
 
 
     [unused_argument(index, last)] def override preVisitExprMakeStructField(expr : smart_ptr<ExprMakeStruct>; index : int; decl : MakeFieldDeclPtr; last : bool) : void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken()
         token.kind = "field"
@@ -286,8 +290,14 @@ class AstData : AstVisitor
             // res.tokens[idx].name = "{name}"
             res.tokens[idx].alias = "{name}"
 
+
     def override preVisitExpression(expr : ExpressionPtr) : void
-        if skipExprs || expr == null || expr.genFlags.generated
+        let ptr = intptr(expr |> get_ptr())
+        if key_exists(visitedExprs, ptr)
+            return
+        visitedExprs |> insert(ptr)
+
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         if expr is ExprBlock || expr is ExprMakeBlock // ignore blocks, huge amount of text, no value
             return
@@ -313,7 +323,7 @@ class AstData : AstVisitor
         res.tokens |> emplace(token)
 
     // def preVisitExprLooksLikeCall_(expr:ExprLooksLikeCall?): void
-    //     if skipExprs || expr == null || expr.genFlags.generated
+    //     if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
     //         return
     //     var token <- DasToken(expr, completion)
     //     token.name = "{expr.name}"
@@ -321,12 +331,12 @@ class AstData : AstVisitor
     //     res.tokens |> emplace(token)
 
     // def override preVisitExprLooksLikeCall(expr : smart_ptr<ExprLooksLikeCall>) : void
-    //     if skipExprs || expr == null || expr.genFlags.generated
+    //     if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
     //         return
     //     preVisitExprLooksLikeCall_(expr |> get_ptr())
 
     def preVisitExprCallFunc(expr:ExprCallFunc?): void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken(expr, completion)
         token.name = "{expr.name}"
@@ -351,12 +361,12 @@ class AstData : AstVisitor
         res.tokens |> emplace(token)
 
     def override preVisitExprCall(expr:smart_ptr<ExprCall>): void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         preVisitExprCallFunc(expr |> get_ptr())
 
     def override preVisitExprLet(expr:smart_ptr<ExprLet>) : void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         for v in expr.variables
             var token <- DasToken(expr, completion)
@@ -373,7 +383,7 @@ class AstData : AstVisitor
             res.tokens |> emplace(token)
 
     [unused_argument(last)] def override preVisitExprForVariable(expr : smart_ptr<ExprFor>; svar : VariablePtr; last : bool) : void
-        if skipExprs || expr == null || expr.genFlags.generated || svar.flags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated || svar.flags.generated
             return
         var token <- DasToken(expr, completion)
         token.name = "{svar.name}"
@@ -390,7 +400,7 @@ class AstData : AstVisitor
 
 
     def override preVisitExprVar(expr:smart_ptr<ExprVar>) : void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken(expr, completion)
         token.name = "{expr.name}"
@@ -405,10 +415,24 @@ class AstData : AstVisitor
         //     *completion |> parse_typedecl(token.tdk, expr._type)
         res.tokens |> emplace(token)
 
+    // this code breaks array comprehension hints, see generateComprehension(...) for more info
+    // def override preVisitExprBlock(blk : smart_ptr<ExprBlock>) : void
+    //     if blk.genFlags.generated
+    //         skipExprs |> push(true)
+    //         return
+    //     if length(skipExprs) > 0 
+    //         return    
+
+    // def override visitExprBlock(var blk:smart_ptr<ExprBlock>) : ExpressionPtr
+    //     if blk.genFlags.generated
+    //         skipExprs |> pop()
+    //     return <- blk
+
     def override preVisitFunction(fun : FunctionPtr) : void
         if fun.flags.generated && !fun.flags._generator && !fun.flags._lambda
-            skipExprs = true
+            skipExprs |> push(true)
             return
+        delete skipExprs
         if fun.flags._lambda
             return
 
@@ -446,7 +470,7 @@ class AstData : AstVisitor
             // preVisitExprVar(arg)
             var token2 <- DasToken()
             token2 |> fill_at(arg.at)
-            token2.kind = "fn_arg_token"
+            token2.kind = "func_arg"
             token2.name = "{arg.name}"
             if arg.init != null
                 token2.value = "{arg.init |> describe()}"
@@ -457,23 +481,23 @@ class AstData : AstVisitor
             res.tokens |> emplace(token2)
 
     def override visitFunction(var fun : FunctionPtr) : FunctionPtr
-        skipExprs = false
+        delete skipExprs
         return <- fun
 
     def override preVisitExprOp1(expr : smart_ptr<ExprOp1>) : void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         preVisitExprCallFunc(expr |> get_ptr())
 
     def override preVisitExprOp2(expr : smart_ptr<ExprOp2>) : void
-        if skipExprs || expr == null || expr.genFlags.generated
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         preVisitExprCallFunc(expr |> get_ptr())
 
     // def override preVisitExprTypeInfo(expr : smart_ptr<ExprTypeInfo>) : void
-    //     if skipExprs || expr == null || expr.genFlags.generated
+    //     if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
     //         return
-    //     if skipExprs || expr == null || expr.genFlags.generated
+    //     if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
     //         return
     //     var name = "typeinfo"
     //     var desc = "{name}("

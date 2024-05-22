@@ -71,6 +71,8 @@ export enum TokenKind {
     ExprAddr = 'ExprAddr',
     ExprGoto = 'ExprGoto',
     ExprField = 'ExprField',
+	FuncArg = 'func_arg',
+	ExprFor = 'ExprFor',
 }
 
 export function isValidIdChar(ch: string) {
@@ -709,8 +711,14 @@ export function isRangeEqual(a: Range, b: Range) {
     return isPositionEqual(a.start, b.start) && isPositionEqual(a.end, b.end)
 }
 
+// completely empty range
 export function isRangeZeroEmpty(a: Range) {
     return (a.start.line === 0 && a.start.character === 0 && a.end.line === 0 && a.end.character === 0)
+}
+
+// range with zero length
+export function isRangeLengthZero(a: Range) {
+    return a.start.line === a.end.line && a.end.character - a.start.character <= 1
 }
 
 export function isPositionLess(a: Position, b: Position) {

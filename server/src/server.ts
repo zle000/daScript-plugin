@@ -1,6 +1,8 @@
 
 import {
 	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit,
+	InlayHint,
+	InlayHintKind,
 } from 'vscode-languageserver/node'
 
 import {
@@ -13,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -94,6 +96,9 @@ connection.onInitialize((params) => {
 			typeDefinitionProvider: true,
 			documentSymbolProvider: true,
 			referencesProvider: true,
+			inlayHintProvider: {
+				resolveProvider: false,
+			},
 			// colorProvider: true,
 			// documentHighlightProvider : true, // TODO: implement
 			// workspace: {
@@ -862,21 +867,97 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 			selectionRange: fn._range,
 		})
 	}
-	// for (const tok of fileData.tokens) {
-	// 	const fnToken = tok.kind == 'func'
-	// 	if (!fnToken)
-	// 		continue
-	// 	if (tok._uri != documentSymbolParams.textDocument.uri)
-	// 		continue
+	return res
+})
 
-	// 	res.push({
-	// 		name: tok.name,
-	// 		detail: describeToken(tok),
-	// 		kind: fnToken ? SymbolKind.Function : SymbolKind.Variable,
-	// 		range: tok._range,
-	// 		selectionRange: tok._range,
-	// 	})
-	// }
+function closedBracketPos(doc: TextDocument, pos: Position): Position {
+	let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
+	let num = 0
+	// skip spaces
+	let i = 0
+	for (; i < line.length; i++) {
+		const ch = line[i]
+		if (!isSpaceChar(ch))
+			break
+	}
+
+	if (line[i] != '(')
+		return pos
+
+	for (; i < line.length; i++) {
+		const ch = line[i]
+		if (ch == '(')
+			num++
+		else if (ch == ')')
+			num--
+		if (num == 0)
+			return Position.create(pos.line, pos.character + i + 1)
+	}
+	return pos
+}
+
+function shortTdk(tdk: string): string {
+	const till = tdk.indexOf("<")
+	const skip = tdk.indexOf("::")
+	if (skip > 0 && (till < 0 || skip < till))
+		return tdk.substring(skip + 2)
+	return tdk
+}
+
+connection.languages.inlayHint.on(async (inlayHintParams) => {
+	const fileData = await getDocumentData(inlayHintParams.textDocument.uri)
+	if (!fileData)
+		return null
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const res: InlayHint[] = []
+	let idx = 0
+	const n = fileData.tokens.length
+	while (idx < n - 1) {
+		const token = fileData.tokens[idx]
+		let nextToken = fileData.tokens[idx + 1]
+		++idx
+		if (isPositionLessOrEqual(inlayHintParams.range.start, token._range.start)
+			&& isPositionLess(token._range.end, inlayHintParams.range.end)
+			&& token._uri == inlayHintParams.textDocument.uri) {
+			// console.log(token)
+			if (token.kind == TokenKind.ExprLet || token.kind == TokenKind.ExprFor) {
+				// ignore let generated in dascript generateComprehension(...)
+				if (token.name.startsWith('__acomp'))
+					continue
+				// sometimes typedecl cover whole let expression, ignore it case
+				if (nextToken.kind != TokenKind.Typedecl || isRangeLengthZero(nextToken._range) || isPositionLessOrEqual(nextToken._range.start, token._range.start)) {
+					const short = shortTdk(token.tdk)
+					res.push({
+						label: `: ${short}`,
+						position: token._range.end,
+						kind: InlayHintKind.Type,
+						tooltip: short != token.tdk ? token.tdk : undefined,
+					})
+				}
+				continue
+			}
+			if (token.kind == TokenKind.Func) {
+				if (nextToken.kind == TokenKind.FuncArg) {
+					while (nextToken.kind == TokenKind.FuncArg) {
+						idx += 2
+						nextToken = fileData.tokens[idx]
+					}
+				}
+				if (nextToken.kind != TokenKind.Typedecl || isRangeLengthZero(nextToken._range)) {
+					const short = shortTdk(token.tdk)
+					res.push({
+						label: `: ${short}`,
+						position: closedBracketPos(doc, token._range.end),
+						kind: InlayHintKind.Type,
+						tooltip: short != token.tdk ? token.tdk : undefined,
+					})
+				}
+			}
+
+		}
+	}
 	return res
 })
 
