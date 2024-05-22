@@ -72,6 +72,7 @@ export enum TokenKind {
     ExprGoto = 'ExprGoto',
     ExprField = 'ExprField',
 	FuncArg = 'func_arg',
+	BlockArg = 'block_arg',
 	ExprFor = 'ExprFor',
 }
 

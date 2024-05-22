@@ -464,21 +464,21 @@ class AstData : AstVisitor
             *completion |> parse_typedecl(restdk, fun.result)
         res.tokens |> emplace(token)
 
-        for arg in fun.arguments
-            if arg.flags.generated
-                continue
-            // preVisitExprVar(arg)
-            var token2 <- DasToken()
-            token2 |> fill_at(arg.at)
-            token2.kind = "func_arg"
-            token2.name = "{arg.name}"
-            if arg.init != null
-                token2.value = "{arg.init |> describe()}"
-            token2.tdk = TypeDeclKey(arg._type)
-            token2.isConst = arg._type.flags.constant
-            *completion |> parse_typedecl(token2.tdk, arg._type)
-            token2.mod = token.mod
-            res.tokens |> emplace(token2)
+
+    [unused_argument(lastArg)] def override preVisitFunctionArgument(fun:FunctionPtr;arg:VariablePtr;lastArg:bool) : void
+        if length(skipExprs) > 0 || fun == null || fun.flags.generated || arg.flags.generated
+            return
+        var token <- DasToken()
+        token.kind = "func_arg"
+        token.name = "{arg.name}"
+        if arg.init != null
+            token.value = "{arg.init |> describe()}"
+        token.tdk = TypeDeclKey(arg._type)
+        token.isConst = arg._type.flags.constant
+        *completion |> parse_typedecl(token.tdk, arg._type)
+        token.mod = fun._module != null ? "{fun._module.name}" : ""
+        token |> fill_at(arg.at)
+        res.tokens |> emplace(token)
 
     def override visitFunction(var fun : FunctionPtr) : FunctionPtr
         delete skipExprs

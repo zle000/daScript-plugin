@@ -922,7 +922,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 			&& isPositionLess(token._range.end, inlayHintParams.range.end)
 			&& token._uri == inlayHintParams.textDocument.uri) {
 			// console.log(token)
-			if (token.kind == TokenKind.ExprLet || token.kind == TokenKind.ExprFor) {
+			if (token.kind == TokenKind.ExprLet || token.kind == TokenKind.ExprFor || token.kind == TokenKind.FuncArg || token.kind == TokenKind.BlockArg) {
 				// ignore let generated in dascript generateComprehension(...)
 				if (token.name.startsWith('__acomp'))
 					continue
@@ -940,9 +940,10 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 			}
 			if (token.kind == TokenKind.Func) {
 				if (nextToken.kind == TokenKind.FuncArg) {
+					var skip = 0
 					while (nextToken.kind == TokenKind.FuncArg) {
-						idx += 2
-						nextToken = fileData.tokens[idx]
+						skip += 2
+						nextToken = fileData.tokens[idx + skip]
 					}
 				}
 				if (nextToken.kind != TokenKind.Typedecl || isRangeLengthZero(nextToken._range)) {
