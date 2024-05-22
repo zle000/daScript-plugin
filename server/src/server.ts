@@ -933,7 +933,6 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 						label: `: ${short}`,
 						position: token._range.end,
 						kind: InlayHintKind.Type,
-						tooltip: short != token.tdk ? token.tdk : undefined,
 					})
 				}
 				continue
@@ -952,7 +951,6 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 						label: `: ${short}`,
 						position: closedBracketPos(doc, token._range.end),
 						kind: InlayHintKind.Type,
-						tooltip: short != token.tdk ? token.tdk : undefined,
 					})
 				}
 			}
