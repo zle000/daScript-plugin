@@ -669,9 +669,27 @@ connection.onReferences(async (referencesParams) => {
 	if (callChain.length === 0)
 		return null
 	const last = callChain[callChain.length - 1]
-	const res = last.tokens
-	// NOTE:! take in count declAt
-	return null
+	const foundTokens = last.tokens
+
+	let result : Location[] = []
+
+	for (const res of foundTokens) {
+		let declAt = res.kind === TokenKind.Func ? res : res.declAt
+		if (declAt.file.length === 0) {
+			continue
+		}
+		result.push(Location.create(declAt._uri, declAt._range))
+
+		if (!isRangeZeroEmpty(declAt._range)) {
+			for (const td of fileData.tokens) {
+				if (isRangeEqual(declAt._range, td.declAt._range)) {
+					result.push(Location.create(td._uri, td._range))
+				}
+			}
+		}
+	}
+
+	return result
 })
 
 // connection.onDeclaration(async (declarationParams) => {
