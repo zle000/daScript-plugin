@@ -476,13 +476,28 @@ class AstData : AstVisitor
         token.tdk = TypeDeclKey(arg._type)
         token.isConst = arg._type.flags.constant
         *completion |> parse_typedecl(token.tdk, arg._type)
-        token.mod = fun._module != null ? "{fun._module.name}" : ""
+        token.mod = arg._module != null ? "{arg._module.name}" : ""
         token |> fill_at(arg.at)
         res.tokens |> emplace(token)
 
     def override visitFunction(var fun : FunctionPtr) : FunctionPtr
         delete skipExprs
         return <- fun
+
+    [unused_argument(lastArg)] def override preVisitExprBlockArgument(blk:smart_ptr<ExprBlock>;arg:VariablePtr;lastArg:bool): void
+        if length(skipExprs) > 0 || blk == null || blk.genFlags.generated || arg.flags.generated
+            return
+        var token <- DasToken()
+        token.kind = "block_arg"
+        token.name = "{arg.name}"
+        if arg.init != null
+            token.value = "{arg.init |> describe()}"
+        token.tdk = TypeDeclKey(arg._type)
+        token.isConst = arg._type.flags.constant
+        *completion |> parse_typedecl(token.tdk, arg._type)
+        token.mod = arg._module != null ? "{arg._module.name}" : ""
+        token |> fill_at(arg.at)
+        res.tokens |> emplace(token)
 
     def override preVisitExprOp1(expr : smart_ptr<ExprOp1>) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
