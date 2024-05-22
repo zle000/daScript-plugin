@@ -1053,7 +1053,12 @@ function updateDocumentData(doc: TextDocument) {
 
 async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	return getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
-		return getDocumentDataRaw(uri, documents.get(uri)).then(() => {
+		let doc = documents.get(uri)
+		if (!doc) {
+			console.log('document not found', uri)
+			return null
+		}
+		return getDocumentDataRaw(uri, doc).then(() => {
 			return validatingResults.get(uri)
 		})
 	})
