@@ -671,7 +671,7 @@ connection.onReferences(async (referencesParams) => {
 	const last = callChain[callChain.length - 1]
 	const foundTokens = last.tokens
 
-	let result : Location[] = []
+	let result: Location[] = []
 
 	for (const res of foundTokens) {
 		let declAt = res.kind === TokenKind.Func ? res : res.declAt
