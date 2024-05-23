@@ -314,9 +314,12 @@ class AstData : AstVisitor
         if expr is ExprField
             let field = expr as ExprField
             token.name = "{field.name}"
-            // token.tdk = field._type != null ? "{TypeDeclKey(field._type)}" : ""
             if field.field != null
                 token.declAt |> fill_at(field.field.at)
+                if field.field._type != null
+                    token.tdk = TypeDeclKey(field.field._type)
+                    token.isConst = field.field._type.flags.constant
+                    *completion |> parse_typedecl(token.tdk, field.field._type)
         elif expr is ExprAddr
             token.name = "{(expr as ExprAddr).target}"
         else
@@ -551,3 +554,18 @@ class AstData : AstVisitor
     // - variables
     // - functions
     // - operators (Op1, Op2)
+
+    def override preVisitExprAssume(expr:smart_ptr<ExprAssume>) : void
+        if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
+            return
+        var token <- DasToken(expr, completion)
+        token.name = "{expr.alias}"
+        if expr.subexpr != null
+            token.value = "{expr.subexpr |> describe()}"
+            token |> fill_at(expr.subexpr.at)
+            if expr.subexpr._type != null
+                token.tdk = TypeDeclKey(expr.subexpr._type)
+                token.isConst = expr.subexpr._type.flags.constant
+                *completion |> parse_typedecl(token.tdk, expr.subexpr._type)
+        token |> fill_at(expr.at)
+        res.tokens |> emplace(token)

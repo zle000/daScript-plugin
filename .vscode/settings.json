@@ -1,6 +1,8 @@
 {
     "typescript.preferences.quoteStyle": "single",
     "cSpell.words": [
+        "acomp",
+        "autoinfer",
         "cerr",
         "dascript",
         "daslib",
@@ -9,7 +11,9 @@
         "struct",
         "tdks",
         "Typedecl",
-        "uriparser"
+        "urange",
+        "uriparser",
+        "xyzw"
     ],
     "typescript.inlayHints.variableTypes.enabled": true,
     "typescript.inlayHints.propertyDeclarationTypes.enabled": true,
