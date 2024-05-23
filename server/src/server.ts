@@ -723,11 +723,16 @@ connection.onDefinition(async (declarationParams) => {
 				addValidLocation(res, func.decl)
 		}
 		if (tok.kind == TokenKind.Typedecl) {
-			for (const td of fileData.completion.typeDecls) {
-				if (td.tdk === tok.tdk) {
+			const td = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
+			if (td != null) {
+				const pos = typeDeclDefinition(td, fileData.completion)
+				addValidLocation(res, pos)
+			}
+			if (tok.alias.length > 0) {
+				const td = fileData.completion.typeDecls.find(td => td.alias === tok.alias)
+				if (td != null) {
 					const pos = typeDeclDefinition(td, fileData.completion)
 					addValidLocation(res, pos)
-					break
 				}
 			}
 		}

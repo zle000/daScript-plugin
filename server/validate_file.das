@@ -276,6 +276,7 @@ class AstData : AstVisitor
         token.kind = "typedecl"
         // token.name = tdk
         token.tdk = tdk
+        token.alias = typ.alias |> string()
         token.isConst = typ.flags.constant
         token |> fill_at(typ.at)
         res.tokens |> emplace(token)
