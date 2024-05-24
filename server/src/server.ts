@@ -15,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, EXTENSION_FN_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -487,8 +487,11 @@ function findNearestTokensAt(doc: TextDocument, fileData: FixedValidationResult,
 function findTokensUnderCursor(doc: TextDocument, fileData: FixedValidationResult, position: Position): DasToken[] {
 	let res: DasToken[] = []
 	for (const tok of fileData.tokens) {
-		if (tok._uri == fileData.uri && posInRange(position, tok._range)
-			&& tok._originalText == doc.getText(tok._range) && tok.tdk.length > 0
+		if (tok._uri == fileData.uri
+			&& tok._range.start.line == tok._range.end.line
+			&& posInRange(position, tok._range)
+			&& tok._originalText == doc.getText(tok._range)
+			&& tok.tdk.length > 0
 		) {
 			res.push(tok)
 		}
@@ -526,25 +529,16 @@ function fixCompletion(c: CompletionItem, newText: string, replaceStart: Positio
 	}
 }
 
-const operators = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
+const OPERATORS = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
 	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
-	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", "`is", "`as", "?as",
-	":=", "<-",]
+	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", ":=", "<-",]
 
-const remapOperatorsMap: Map<string, string> = new Map([
+const OPERATOR_REMAP: Map<string, string> = new Map([
 	['.', '.'],
 	['?.', '?.'],
 	['[]', '['],
 	['?[]', '?['],
-	['`is', ' is '],
-	['`as', ' as '],
-	// ['?as', ' as '],
 ])
-
-function remapOperator(op: string): string {
-	const res = remapOperatorsMap.get(op)
-	return res ? res : ` ${op} `
-}
 
 connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
@@ -561,17 +555,6 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
 	const replaceStart = call.objRange.end
 	for (let completionTdk of call.tdks) {
-		// remap operators [] and ?[] to get actual completion type
-		let searchOperatorName = call.brackets == Brackets.Square ? '[]' : call.brackets == Brackets.QuestionSquare ? '?[]' : ''
-		if (searchOperatorName.length > 0) {
-			for (const fn of fileData.completion.functions) {
-				if (fn.args.length > 0 && fn.name == searchOperatorName && fn.args[0].tdk === completionTdk) {
-					completionTdk = fn.tdk
-					call.brackets = Brackets.None
-					break
-				}
-			}
-		}
 		let actualTdk = completionTdk
 		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
 		if (typeDeclData != null) {
@@ -589,19 +572,23 @@ connection.onCompletion(async (textDocumentPosition) => {
 			for (const fn of fileData.completion.functions) {
 				if (fn.isClassMethod)
 					continue
-				if (fn.name.startsWith('.`'))
+				if (fn.name.startsWith(PROPERTY_PREFIX))
 					continue
 				// TODO: ignore const cases: Foo const == Foo
-				// TODO: convert dot to pipe
 				if (fn.args.length > 0 && fn.args[0].tdk === actualTdk) {
-					const c = CompletionItem.create(fn.name)
+					const propertyName = fixPropertyName(fn.name)
+					const isProperty = propertyName != null
+					const isOperator = !isProperty && OPERATORS.includes(fn.name)
+					const c = CompletionItem.create(isProperty ? propertyName : fn.name)
 					c.detail = funcDetail(fn)
 					c.documentation = funcDocs(fn)
-					const isOperator = operators.includes(fn.name)
-					c.kind = isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
-					fixCompletion(c, isOperator ? remapOperator(fn.name) : ` |> ${fn.name}(`, replaceStart, textDocumentPosition.position)
-					c.sortText = isOperator ? '4' : '3'
-					res.push(c)
+					c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
+					const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`
+					fixCompletion(c, newText, replaceStart, textDocumentPosition.position)
+					c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT
+					const prev = res.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
+					if (prev == null)
+						res.push(c)
 				}
 			}
 		}
@@ -1474,7 +1461,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			f._uri = AtToUri(f, uri, settings, res.dasRoot, fixedResults.filesCache)
 			f.decl._range = AtToRange(f.decl)
 			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot, fixedResults.filesCache)
-			if ((f.args.length == 1 || f.args.length == 2) && f.name.startsWith('.`')) {
+			if ((f.args.length == 1 || f.args.length == 2) && f.name.startsWith(PROPERTY_PREFIX)) {
 				let found = false
 				const td = res.completion.typeDecls.find(td => td.tdk === f.args[0].tdk)
 				if (td) {

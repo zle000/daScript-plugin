@@ -4,6 +4,26 @@ import fs = require('fs')
 import path = require('path')
 import { URI } from 'vscode-uri'
 
+
+export enum Delimiter {
+    None = '',
+    Space = ' ',
+    Dot = '.',
+    Arrow = '->',
+    QuestionDot = '?.',
+    As = 'as',
+    Is = 'is',
+    QuestionAs = '?as',
+    Pipe = '|>',
+}
+
+export enum Brackets {
+    None = 0,
+    Round = 1,
+    Square = 2,
+    QuestionSquare = 3,
+}
+
 export enum BaseType {
     none = 'none',
     autoinfer = 'auto',
@@ -457,6 +477,12 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): stri
     return res
 }
 
+export const FIELD_SORT = '0'
+export const PROPERTY_SORT = '1'
+export const METHOD_SORT = '2'
+export const EXTENSION_FN_SORT = '3'
+export const OPERATOR_SORT = '4'
+
 // returns actual CompletionTypeDecl
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
     let resultTd = td
@@ -479,7 +505,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                     c.detail = structFieldDetail(f)
                     c.documentation = structFieldDocs(f, st)
                     c.data = f.tdk
-                    c.sortText = isFunction ? '2' : f._property ? '1' : '0'
+                    c.sortText = isFunction ? METHOD_SORT : f._property ? PROPERTY_SORT : FIELD_SORT
                     res.push(c)
                 })
         }
@@ -496,7 +522,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                 c.detail = enumValueDetail(v)
                 c.documentation = enumValueDocs(v, en)
                 c.data = en.tdk
-                c.sortText = '0'
+                c.sortText = FIELD_SORT
                 res.push(c)
             })
         }
@@ -542,7 +568,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             c.detail = typeDeclFieldDetail(f)
             c.documentation = typeDeclFieldDocs(f, td)
             c.data = f.tdk
-            c.sortText = '0'
+            c.sortText = FIELD_SORT
             res.push(c)
         })
         if (td.baseType == BaseType.tFloat2 || td.baseType == BaseType.tFloat3 || td.baseType == BaseType.tFloat4
@@ -558,32 +584,83 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                     c.kind = CompletionItemKind.Field
                     c.detail = `${c.label} : ${type}`
                     c.data = type
-                    c.sortText = '0'
+                    c.sortText = FIELD_SORT
                     res.push(c)
                 }
             }
             // const td2 = cr.typeDecls.find(t => t.tdk === type)
             // if (td2)
-            //     resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+            //     resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
         }
         else if (td.baseType == BaseType.tRange64) {
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tInt64)
             if (td2)
-                resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
         }
         else if (td.baseType == BaseType.tURange64) {
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
             if (td2)
-                resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
         }
     }
     if (delimiter == Delimiter.Is) {
         const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tBool)
-        if (td2)
-            resultTd = typeDeclCompletion(td2, cr, Delimiter.None, Brackets.None, res)
+        if (td2 && td2 != td)
+            resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+    }
+    let searchOperatorName = brackets == Brackets.Square ? '[]' : brackets == Brackets.QuestionSquare ? '?[]' : ''
+    if (searchOperatorName.length > 0) {
+        for (const fn of cr.functions) {
+            if (fn.args.length > 0 && fn.name == searchOperatorName && fn.args[0].tdk === td.tdk) {
+                const td2 = cr.typeDecls.find(t => t.tdk === fn.tdk)
+                if (td2) {
+                    resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+                }
+            }
+        }
+    }
+
+    const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
+    const propertyPrefixes = propPrefix.length > 0 ? propPrefix : PROPERTY_PREFIXES
+    for (const propertyPrefix of propertyPrefixes) {
+        for (const fn of cr.functions) {
+            if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
+                const propertyName = fixPropertyName(fn.name)
+                const c = CompletionItem.create(propertyName)
+                c.kind = CompletionItemKind.Property
+                c.detail = funcDetail(fn)
+                c.documentation = funcDocs(fn)
+                c.data = fn.tdk
+                c.sortText = PROPERTY_SORT
+                c.insertText = c.label
+                res.push(c)
+            }
+        }
     }
 
     return resultTd
+}
+
+
+export const PROPERTY_PREFIX = '.`'
+
+const PROPERTY_PREFIXES: [Delimiter, [string, string]][] = [
+    [Delimiter.QuestionDot, ['?.`', '?.']],
+    [Delimiter.QuestionDot, ['`?.`', '?.']],
+    [Delimiter.As, ['`as`', ' as ']],
+    [Delimiter.As, ['``as`', ' as ']],
+    [Delimiter.Is, ['`is`', ' is ']],
+    [Delimiter.Is, ['``is`', ' is ']],
+    [Delimiter.QuestionAs, ['?as`', ' ?as ']],
+    [Delimiter.QuestionAs, ['`?as`', ' ?as ']],
+]
+
+export function fixPropertyName(op: string) {
+    for (const prefix of PROPERTY_PREFIXES) {
+        if (op.startsWith(prefix[1][0]))
+            return prefix[1][1] + op.substring(prefix[1][0].length)
+    }
+    return null
 }
 
 export interface CompletionTypeDef extends CompletionAt {
@@ -772,23 +849,4 @@ export function isPositionLessOrEqual(a: Position, b: Position) {
 
 export function isPositionEqual(a: Position, b: Position) {
     return a.line == b.line && a.character == b.character
-}
-
-export enum Delimiter {
-    None = '',
-    Space = ' ',
-    Dot = '.',
-    Arrow = '->',
-    QuestionDot = '?.',
-    As = 'as',
-    Is = 'is',
-    QuestionAs = '?as',
-    Pipe = '|>',
-}
-
-export enum Brackets {
-    None = 0,
-    Round = 1,
-    Square = 2,
-    QuestionSquare = 3,
 }
