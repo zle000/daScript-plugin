@@ -16,6 +16,8 @@ import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, EXTENSION_FN_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { shortTdk } from './completion'
+import { closedBracketPos } from './completion'
 
 
 // Creates the LSP connection
@@ -947,40 +949,6 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	}
 	return res
 })
-
-function closedBracketPos(doc: TextDocument, pos: Position): Position {
-	let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
-	let num = 0
-	// skip spaces
-	let i = 0
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (!isSpaceChar(ch))
-			break
-	}
-
-	if (line[i] != '(')
-		return pos
-
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (ch == '(')
-			num++
-		else if (ch == ')')
-			num--
-		if (num == 0)
-			return Position.create(pos.line, pos.character + i + 1)
-	}
-	return pos
-}
-
-function shortTdk(tdk: string): string {
-	const till = tdk.indexOf("<")
-	const skip = tdk.indexOf("::")
-	if (skip > 0 && (till < 0 || skip < till))
-		return tdk.substring(skip + 2)
-	return tdk
-}
 
 connection.languages.inlayHint.on(async (inlayHintParams) => {
 	const doc = documents.get(inlayHintParams.textDocument.uri)

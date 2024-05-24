@@ -3,6 +3,7 @@ import { DasSettings } from './dasSettings'
 import fs = require('fs')
 import path = require('path')
 import { URI } from 'vscode-uri'
+import { TextDocument } from 'vscode-languageserver-textdocument'
 
 
 export enum Delimiter {
@@ -849,4 +850,38 @@ export function isPositionLessOrEqual(a: Position, b: Position) {
 
 export function isPositionEqual(a: Position, b: Position) {
     return a.line == b.line && a.character == b.character
+}
+
+export function shortTdk(tdk: string): string {
+	const till = tdk.indexOf("<")
+	const skip = tdk.indexOf("::")
+	if (skip > 0 && (till < 0 || skip < till))
+		return tdk.substring(skip + 2)
+	return tdk
+}
+
+export function closedBracketPos(doc: TextDocument, pos: Position): Position {
+	let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
+	let num = 0
+	// skip spaces
+	let i = 0
+	for (; i < line.length; i++) {
+		const ch = line[i]
+		if (!isSpaceChar(ch))
+			break
+	}
+
+	if (line[i] != '(')
+		return pos
+
+	for (; i < line.length; i++) {
+		const ch = line[i]
+		if (ch == '(')
+			num++
+		else if (ch == ')')
+			num--
+		if (num == 0)
+			return Position.create(pos.line, pos.character + i + 1)
+	}
+	return pos
 }
