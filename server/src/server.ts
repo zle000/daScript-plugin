@@ -15,7 +15,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValid, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
 
 
 // Creates the LSP connection
@@ -483,6 +483,20 @@ function fixCompletion(c: CompletionItem, newText: string, replaceStart: Positio
 	}
 }
 
+async function getTokenData(uri : string, position : Position): Promise<[FixedValidationResult, TextDocument, CallChain[]] | null> {
+	const fileData = await getDocumentData(uri)
+	if (!fileData)
+		return null
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, position, /*forAutocompletion*/false)
+	if (callChain.length === 0)
+		return null
+
+	return [fileData, doc, callChain]
+}
+
 const operators = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
 	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
 	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", "`is", "`as", "?as",
@@ -664,32 +678,24 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 })
 
 connection.onReferences(async (referencesParams) => {
-	const fileData = await getDocumentData(referencesParams.textDocument.uri)
-	if (!fileData)
-		return null
-	const doc = documents.get(fileData.uri)
-	if (!doc)
-		return null
-	const callChain = findCallChain(doc, fileData, referencesParams.position, /*forAutocompletion*/false)
-	if (callChain.length === 0)
-		return null
-	const last = callChain[callChain.length - 1]
-	const foundTokens = last.tokens
-
+	const [fileData, doc, callChain] = await getTokenData(referencesParams.textDocument.uri, referencesParams.position)
 	let result: Location[] = []
 
-	for (const res of foundTokens) {
-		let declAt = res.kind === TokenKind.Func ? res : res.declAt
-		if (declAt.file.length === 0) {
+	for (const res of callChain[callChain.length - 1].tokens) {
+		console.log("[onReferences] Found token", res)
+
+		let declAt = isValid(res.declAt) && res.kind !== TokenKind.Func
+			? res.declAt
+			: res
+		if (isRangeZeroEmpty(declAt._range) || declAt.file.length === 0) {
 			continue
 		}
+
 		result.push(Location.create(declAt._uri, declAt._range))
 
-		if (!isRangeZeroEmpty(declAt._range)) {
-			for (const td of fileData.tokens) {
-				if (isRangeEqual(declAt._range, td.declAt._range)) {
-					result.push(Location.create(td._uri, td._range))
-				}
+		for (const td of fileData.tokens) {
+			if (declAt._uri === td.declAt._uri && isRangeEqual(declAt._range, td.declAt._range)) {
+				result.push(Location.create(td._uri, td._range))
 			}
 		}
 	}

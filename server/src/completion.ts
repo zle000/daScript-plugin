@@ -153,6 +153,10 @@ export interface CompletionAt {
     _originalText: string
 }
 
+export function isValid(at : CompletionAt): boolean {
+    return at.file !== "" && at.line !== -1
+}
+
 export function addValidLocation(res: Location[], at: CompletionAt): void {
     if (at != null && at._uri.length > 0 && !isRangeZeroEmpty(at._range))
         res.push(Location.create(at._uri, at._range))
