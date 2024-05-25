@@ -15,7 +15,9 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, FixedValidationResult, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValid, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, EXTENSION_FN_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { shortTdk } from './completion'
+import { closedBracketPos } from './completion'
 
 
 // Creates the LSP connection
@@ -129,10 +131,17 @@ interface CallChain {
 	tokens: DasToken[]
 	tdks: Set<string>
 	delimiter: Delimiter
+	delimiterRange: Range
 	brackets: Brackets
 }
 
 function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
+	return findCallChain_(doc, fileData, pos, forAutocompletion, 0)
+}
+function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean, recursion: number): CallChain[] {
+	if (recursion > 10) {
+		return []
+	}
 	/// find chain of fields access - foo.key or foo().key  ... etc
 	/// support sequences: foo.key.key2.key3
 	/// also support function calls and array/table access: foo().key, foo[0].key, foo().key[0]
@@ -200,13 +209,15 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 				break
 		}
 	}
-	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: tokens, tdks: new Set(tokens.map(it => it.tdk)), delimiter: del, brackets: Brackets.None }
+	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: tokens, tdks: new Set(tokens.map(it => it.tdk)), delimiter: del, brackets: Brackets.None, delimiterRange: Range.create(0, 0, 0, 0) }
 
 	let res: CallChain[] = [keyData]
 	while (i > 0) {
 		del = Delimiter.None
+		let delimiterRange = Range.create(pos.line, i, pos.line, i)
 		// '.' ' ' '?.' '->' 'as' 'is' '?as' '|>'
 
+		// space can be delimiter only when chain is just started
 		if (line[i] === ' ') {
 			i -= 1
 			del = Delimiter.Space
@@ -239,6 +250,7 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 			i -= 2
 			del = Delimiter.Pipe
 		}
+		delimiterRange.start.character = i
 		if (del === Delimiter.None)
 			break
 		// skip spaces
@@ -278,6 +290,7 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 
 				if (brackets == Brackets.Square && i >= 0 && line[i] === '?') {
 					// ?[] case, skip '?'
+					brackets = Brackets.QuestionSquare
 					i--
 				}
 
@@ -304,15 +317,19 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 			i += obj.length // move back to beginning of the word
 			continue
 		}
+
+		// space delimiter can be only at the beginning of the chain
+		if (del == Delimiter.Space && res.length >= 2)
+			break
 		const objRange = Range.create(pos.line, i + 1, pos.line, tokenEnd)
-		res.unshift({ obj: obj, objRange: objRange, tokens: [], tdks: new Set(), delimiter: del, brackets: brackets })
+		res.unshift({ obj: obj, objRange: objRange, tokens: [], tdks: new Set(), delimiter: del, brackets: brackets, delimiterRange: delimiterRange })
 	}
 
-	resolveChainTdk(doc, fileData, res, !forAutocompletion)
+	resolveChainTdks(doc, fileData, res, !forAutocompletion, recursion)
 	return res
 }
 
-function resolveChainTdk(doc: TextDocument, fileData: FixedValidationResult, callChain: CallChain[], forAutocompletion: boolean): void {
+function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, callChain: CallChain[], forAutocompletion: boolean, recursion = 0): void {
 	if (callChain.length === 0)
 		return
 	const last = callChain[callChain.length - 1]
@@ -323,11 +340,13 @@ function resolveChainTdk(doc: TextDocument, fileData: FixedValidationResult, cal
 	let prevTdks: Set<string>
 	let prevBrackets: Brackets = Brackets.None
 	let prevDelimiter: Delimiter = Delimiter.None
+	let prevDelimiterRange: Range
 	var idx = 0
 	while (idx < callChain.length) {
 		if (idx > 0) {
 			prevBrackets = callChain[idx - 1].brackets
 			prevDelimiter = callChain[idx - 1].delimiter
+			prevDelimiterRange = callChain[idx - 1].delimiterRange
 		}
 		const call = callChain[idx]
 		idx++
@@ -337,13 +356,13 @@ function resolveChainTdk(doc: TextDocument, fileData: FixedValidationResult, cal
 			prevTdks = call.tdks
 			continue
 		}
-		const cursorTokens = findTokensUnderCursor(doc, fileData, call.objRange.start)
+		// don't change here anything, it works fine
+		const searchPos = call.delimiter.length > 1 && prevDelimiterRange ? rangeCenter(prevDelimiterRange) : call.objRange.start
+		const cursorTokens = findTokensUnderCursor(doc, fileData, searchPos)
 		if (cursorTokens.length > 0) {
 			for (const cursorTok of cursorTokens) {
-				if (call.obj == cursorTok._originalText) {
-					call.tokens.push(cursorTok)
-					call.tdks.add(cursorTok.tdk)
-				}
+				call.tokens.push(cursorTok)
+				call.tdks.add(cursorTok.tdk)
 			}
 			if (call.tokens.length > 0) {
 				prevTdks = call.tdks
@@ -351,7 +370,7 @@ function resolveChainTdk(doc: TextDocument, fileData: FixedValidationResult, cal
 			}
 		}
 		if (idx == 1) {
-			const tokens = call.tokens.length > 0 ? call.tokens : findTokensAt(fileData, call)
+			const tokens = call.tokens.length > 0 ? call.tokens : findNearestTokensAt(doc, fileData, call, recursion)
 			if (tokens.length > 0) {
 				call.tokens = tokens
 				call.tdks = new Set(tokens.map(it => it.tdk))
@@ -411,19 +430,43 @@ function resolveChainTdk(doc: TextDocument, fileData: FixedValidationResult, cal
 	}
 }
 
-function findTokensAt(fileData: FixedValidationResult, call: CallChain): DasToken[] {
+function findNearestTokensAt(doc: TextDocument, fileData: FixedValidationResult, call: CallChain, recursion: number): DasToken[] {
 	if (call.obj.length === 0 || fileData.tokens.length === 0)
 		return []
 	let nearestPos = Position.create(0, 0)
 	let nearestToken: DasToken = null
+	let nearestAssume: DasToken = null
+	let nearestAssumePos = Position.create(0, 0)
 	for (const t of fileData.tokens) {
 		// ignore fields, we need only top level tokens
 		if (t.kind == TokenKind.ExprField)
 			continue
-		if (t.name === call.obj && t._uri == fileData.uri && isPositionLess(t._range.start, call.objRange.start) && isPositionLessOrEqual(nearestPos, t._range.start)) {
+		if (t.kind == TokenKind.ExprAssume) {
+			if (t.name === call.obj && t._uri == fileData.uri && isPositionLess(t._range.start, call.objRange.start)
+				&& isPositionLessOrEqual(nearestAssumePos, t._range.start)
+			) {
+				nearestAssumePos = t._range.start
+				nearestAssume = t
+			}
+			continue
+		}
+		if (t.name === call.obj && t._uri == fileData.uri && isPositionLess(t._range.start, call.objRange.start)
+			&& isPositionLessOrEqual(nearestPos, t._range.start) && t.tdk.length > 0
+		) {
 			nearestPos = t._range.start
 			nearestToken = t
 			continue
+		}
+	}
+	if (nearestAssume != null && (nearestToken == null || isPositionLess(nearestPos, nearestAssumePos))) {
+		// resolve assure expression
+		// TODO: Assume.declAt is completely wrong in dascript
+		const subChain = findCallChain_(doc, fileData, nearestAssume.declAt._range.end, /*forAutocompletion*/false, recursion + 1)
+		// search for nearest token in subChain
+		if (subChain.length > 0) {
+			const last = subChain[subChain.length - 1]
+			if (last.tokens.length > 0)
+				return last.tokens
 		}
 	}
 	if (nearestToken != null) {
@@ -439,14 +482,19 @@ function findTokensAt(fileData: FixedValidationResult, call: CallChain): DasToke
 		return res
 	}
 	// maybe we have exact match somewhere
-	const exactName = fileData.tokens.find(t => t.name === call.obj && t._uri == fileData.uri)
+	const exactName = fileData.tokens.find(t => t.name === call.obj && t._uri == fileData.uri && t.tdk.length > 0)
 	return exactName != null ? [exactName] : []
 }
 
 function findTokensUnderCursor(doc: TextDocument, fileData: FixedValidationResult, position: Position): DasToken[] {
 	let res: DasToken[] = []
 	for (const tok of fileData.tokens) {
-		if (tok._uri == fileData.uri && posInRange(position, tok._range) && tok._originalText == doc.getText(tok._range)) {
+		if (tok._uri == fileData.uri
+			&& tok._range.start.line == tok._range.end.line
+			&& posInRange(position, tok._range)
+			&& tok._originalText == doc.getText(tok._range)
+			&& tok.tdk.length > 0
+		) {
 			res.push(tok)
 		}
 	}
@@ -497,17 +545,27 @@ async function getTokenData(uri : string, position : Position): Promise<[FixedVa
 	return [fileData, doc, callChain]
 }
 
-const operators = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
+function findDeclarations(): DasToken[] {
+	return []
+}
+
+const OPERATORS = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
 	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
-	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", "`is", "`as", "?as",
-	":=", "<-",]
+	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", ":=", "<-",]
+
+const OPERATOR_REMAP: Map<string, string> = new Map([
+	['.', '.'],
+	['?.', '?.'],
+	['[]', '['],
+	['?[]', '?['],
+])
 
 connection.onCompletion(async (textDocumentPosition) => {
+	const doc = documents.get(textDocumentPosition.textDocument.uri)
+	if (!doc)
+		return null
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
-		return null
-	const doc = documents.get(fileData.uri)
-	if (!doc)
 		return null
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	if (callChain.length === 0)
@@ -516,7 +574,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const res: CompletionItem[] = []
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
 	const replaceStart = call.objRange.end
-	for (const completionTdk of call.tdks) {
+	for (let completionTdk of call.tdks) {
 		let actualTdk = completionTdk
 		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
 		if (typeDeclData != null) {
@@ -534,17 +592,23 @@ connection.onCompletion(async (textDocumentPosition) => {
 			for (const fn of fileData.completion.functions) {
 				if (fn.isClassMethod)
 					continue
+				if (fn.name.startsWith(PROPERTY_PREFIX))
+					continue
 				// TODO: ignore const cases: Foo const == Foo
-				// TODO: convert dot to pipe
 				if (fn.args.length > 0 && fn.args[0].tdk === actualTdk) {
-					const c = CompletionItem.create(fn.name)
+					const propertyName = fixPropertyName(fn.name)
+					const isProperty = propertyName != null
+					const isOperator = !isProperty && OPERATORS.includes(fn.name)
+					const c = CompletionItem.create(isProperty ? propertyName : fn.name)
 					c.detail = funcDetail(fn)
 					c.documentation = funcDocs(fn)
-					const isOperator = operators.includes(fn.name)
-					c.kind = isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
-					fixCompletion(c, isOperator ? ` ${fn.name} ` : ` |> ${fn.name}(`, replaceStart, textDocumentPosition.position)
-					c.sortText = isOperator ? '3' : '2'
-					res.push(c)
+					c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
+					const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`
+					fixCompletion(c, newText, replaceStart, textDocumentPosition.position)
+					c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT
+					const prev = res.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
+					if (prev == null)
+						res.push(c)
 				}
 			}
 		}
@@ -621,11 +685,15 @@ connection.onHover(async (textDocumentPosition) => {
 		for (const tdk of last.tdks) {
 			for (const td of fileData.completion.typeDecls) {
 				if (td.tdk === tdk) {
-					const doc = typeDeclDocs(td, fileData.completion)
 					if (!first)
 						res += '\n'
 					first = false
-					res += `\n${last.obj}\n${doc}`
+					res += `${last.obj} : ${typeDeclDetail(td)}`
+					if (!primitiveBaseType(td, fileData.completion)) {
+						const doc = typeDeclDocs(td, fileData.completion)
+						res += `\n${doc}`
+					}
+					break
 				}
 			}
 		}
@@ -639,11 +707,11 @@ connection.onHover(async (textDocumentPosition) => {
 })
 
 connection.onTypeDefinition(async (typeDefinitionParams) => {
+	const doc = documents.get(typeDefinitionParams.textDocument.uri)
+	if (!doc)
+		return null
 	const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
 	if (!fileData)
-		return null
-	const doc = documents.get(fileData.uri)
-	if (!doc)
 		return null
 	const callChain = findCallChain(doc, fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
 	if (callChain.length === 0)
@@ -708,11 +776,11 @@ connection.onReferences(async (referencesParams) => {
 // 	return null
 // })
 connection.onDefinition(async (declarationParams) => {
+	const doc = documents.get(declarationParams.textDocument.uri)
+	if (!doc)
+		return null
 	const fileData = await getDocumentData(declarationParams.textDocument.uri)
 	if (!fileData)
-		return null
-	const doc = documents.get(fileData.uri)
-	if (!doc)
 		return null
 	const callChain = findCallChain(doc, fileData, declarationParams.position, /*forAutocompletion*/false)
 	if (callChain.length === 0)
@@ -729,11 +797,16 @@ connection.onDefinition(async (declarationParams) => {
 				addValidLocation(res, func.decl)
 		}
 		if (tok.kind == TokenKind.Typedecl) {
-			for (const td of fileData.completion.typeDecls) {
-				if (td.tdk === tok.tdk) {
+			const td = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
+			if (td != null) {
+				const pos = typeDeclDefinition(td, fileData.completion)
+				addValidLocation(res, pos)
+			}
+			if (tok.alias.length > 0) {
+				const td = fileData.completion.typeDecls.find(td => td.alias === tok.alias)
+				if (td != null) {
 					const pos = typeDeclDefinition(td, fileData.completion)
 					addValidLocation(res, pos)
-					break
 				}
 			}
 		}
@@ -784,6 +857,17 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	if (!fileData)
 		return null
 	const res: DocumentSymbol[] = []
+	for (const glob of fileData.completion.globals) {
+		if (glob._uri != documentSymbolParams.textDocument.uri)
+			continue
+		res.push({
+			name: glob.name,
+			kind: SymbolKind.Variable,
+			detail: globalDetail(glob),
+			range: glob._range,
+			selectionRange: glob._range,
+		})
+	}
 	for (const st of fileData.completion.structs) {
 		if (st.gen)
 			continue
@@ -876,46 +960,12 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	return res
 })
 
-function closedBracketPos(doc: TextDocument, pos: Position): Position {
-	let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
-	let num = 0
-	// skip spaces
-	let i = 0
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (!isSpaceChar(ch))
-			break
-	}
-
-	if (line[i] != '(')
-		return pos
-
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (ch == '(')
-			num++
-		else if (ch == ')')
-			num--
-		if (num == 0)
-			return Position.create(pos.line, pos.character + i + 1)
-	}
-	return pos
-}
-
-function shortTdk(tdk: string): string {
-	const till = tdk.indexOf("<")
-	const skip = tdk.indexOf("::")
-	if (skip > 0 && (till < 0 || skip < till))
-		return tdk.substring(skip + 2)
-	return tdk
-}
-
 connection.languages.inlayHint.on(async (inlayHintParams) => {
+	const doc = documents.get(inlayHintParams.textDocument.uri)
+	if (!doc)
+		return null
 	const fileData = await getDocumentData(inlayHintParams.textDocument.uri)
 	if (!fileData)
-		return null
-	const doc = documents.get(fileData.uri)
-	if (!doc)
 		return null
 	const res: InlayHint[] = []
 	let idx = 0
@@ -928,7 +978,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 			&& isPositionLess(token._range.end, inlayHintParams.range.end)
 			&& token._uri == inlayHintParams.textDocument.uri) {
 			// console.log(token)
-			if (token.kind == TokenKind.ExprLet || token.kind == TokenKind.ExprFor) {
+			if (token.kind == TokenKind.ExprLet || token.kind == TokenKind.ExprFor || token.kind == TokenKind.FuncArg || token.kind == TokenKind.BlockArg) {
 				// ignore let generated in dascript generateComprehension(...)
 				if (token.name.startsWith('__acomp'))
 					continue
@@ -939,16 +989,16 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 						label: `: ${short}`,
 						position: token._range.end,
 						kind: InlayHintKind.Type,
-						tooltip: short != token.tdk ? token.tdk : undefined,
 					})
 				}
 				continue
 			}
 			if (token.kind == TokenKind.Func) {
 				if (nextToken.kind == TokenKind.FuncArg) {
+					var skip = 0
 					while (nextToken.kind == TokenKind.FuncArg) {
-						idx += 2
-						nextToken = fileData.tokens[idx]
+						skip += 2
+						nextToken = fileData.tokens[idx + skip]
 					}
 				}
 				if (nextToken.kind != TokenKind.Typedecl || isRangeLengthZero(nextToken._range)) {
@@ -957,7 +1007,6 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 						label: `: ${short}`,
 						position: closedBracketPos(doc, token._range.end),
 						kind: InlayHintKind.Type,
-						tooltip: short != token.tdk ? token.tdk : undefined,
 					})
 				}
 			}
@@ -1059,7 +1108,12 @@ function updateDocumentData(doc: TextDocument) {
 
 async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	return getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
-		return getDocumentDataRaw(uri, documents.get(uri)).then(() => {
+		let doc = documents.get(uri)
+		if (!doc) {
+			console.log('document not found', uri)
+			return null
+		}
+		return getDocumentDataRaw(uri, doc).then(() => {
 			return validatingResults.get(uri)
 		})
 	})
@@ -1385,6 +1439,51 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			f._uri = AtToUri(f, uri, settings, res.dasRoot, fixedResults.filesCache)
 			f.decl._range = AtToRange(f.decl)
 			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot, fixedResults.filesCache)
+			if ((f.args.length == 1 || f.args.length == 2) && f.name.startsWith(PROPERTY_PREFIX)) {
+				let found = false
+				const td = res.completion.typeDecls.find(td => td.tdk === f.args[0].tdk)
+				if (td) {
+					typeDeclIter(td, res.completion, (td, st, en) => {
+						if (st) {
+							found = true
+							let name = f.name.substring(2)
+							let writeProp = false
+							if (name.endsWith('`clone')) {
+								name = name.substring(0, name.length - 6)
+								writeProp = true
+							}
+							let prop = st.fields.find(f => f.name === name && f._property)
+							if (prop) {
+								if (writeProp)
+									prop._writeFn = f
+								else
+									prop._readFn = f
+							} else {
+								st.fields.push({
+									name: name,
+									tdk: f.tdk,
+									offset: -1,
+									isPrivate: false,
+									_range: f._range,
+									_uri: f._uri,
+									gen: f.gen,
+									file: f.file,
+									line: f.line,
+									lineEnd: f.lineEnd,
+									column: f.column,
+									columnEnd: f.columnEnd,
+									_originalText: f._originalText,
+									_property: true,
+									_readFn: !writeProp ? f : null,
+									_writeFn: writeProp ? f : null,
+								})
+							}
+						}
+					})
+				}
+				if (found)
+					continue
+			}
 			addCompletionItem(map, {
 				label: f.name,
 				kind: CompletionItemKind.Function,
