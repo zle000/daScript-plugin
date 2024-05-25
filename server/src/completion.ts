@@ -16,6 +16,7 @@ export enum Delimiter {
     Is = 'is',
     QuestionAs = '?as',
     Pipe = '|>',
+    ColonColon = '::',
 }
 
 export enum Brackets {
@@ -667,15 +668,16 @@ export function fixPropertyName(op: string) {
 
 export interface CompletionTypeDef extends CompletionAt {
     name: string
+    mod: string
     tdk: string
 }
 
 export function typedefDetail(t: CompletionTypeDef) {
-    return `typedef ${t.name} = ${t.tdk}`
+    return `typedef ${modPrefix(t.mod)}${t.name} = ${t.tdk}`
 }
 
 export function typedefDocs(t: CompletionTypeDef) {
-    return `typedef ${t.name} = ${t.tdk}`
+    return `typedef ${modPrefix(t.mod)}${t.name} = ${t.tdk}`
 }
 
 export interface CompletionFuncArg extends CompletionAt {

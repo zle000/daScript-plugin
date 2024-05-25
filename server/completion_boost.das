@@ -297,11 +297,13 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
 
 struct CompletionTypeDef : CompletionAt
     name : string
+    mod : string
     tdk : string
 
-def parse_typedef(var res : CompletionContext; n : string#; t : smart_ptr<TypeDecl>&)
+def parse_typedef(var res : CompletionContext; mod : Module?; n : string#; t : smart_ptr<TypeDecl>&)
     var td <- [[CompletionTypeDef() name="{n}"]]
     td |> fill_at(t.at)
+    td.mod = mod.name |> string()
     td.tdk = TypeDeclKey(t)
     res |> parse_typedecl(td.tdk, t)
     res.result.typeDefs |> emplace(td)
@@ -392,7 +394,7 @@ def parse_module(var res : CompletionContext; mod : rtti::Module?)
 
     mod |> for_each_typedef() <| $(n, t)
         // debug(t)
-        res |> parse_typedef(n, t)
+        res |> parse_typedef(mod, n, t)
 
     var inscope funcCppNames : table<string; string>
     mod |> module_for_each_function() <| $(f)
