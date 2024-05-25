@@ -204,6 +204,7 @@ def DasToken(expr; var completion : CompletionContext?) : DasToken
     token.kind = "{expr.__rtti}"
     if expr._type != null
         token.tdk = TypeDeclKey(expr._type)
+        token.alias = expr._type.alias |> string()
         token.isConst = expr._type.flags.constant
         *completion |> parse_typedecl(token.tdk, expr._type)
     token |> fill_at(expr.at)
@@ -277,6 +278,7 @@ class AstData : AstVisitor
         // token.name = tdk
         token.tdk = tdk
         token.alias = typ.alias |> string()
+        token.mod = typ._module != null ? "{typ._module.name}" : ""
         token.isConst = typ.flags.constant
         token |> fill_at(typ.at)
         res.tokens |> emplace(token)
@@ -377,8 +379,9 @@ class AstData : AstVisitor
             token.name = "{v.name}"
             if v._type != null
                 token.tdk = TypeDeclKey(v._type)
+                token.alias = v._type.alias |> string()
                 token.isConst = v._type.flags.constant
-            *completion |> parse_typedecl(token.tdk, v._type)
+                *completion |> parse_typedecl(token.tdk, v._type)
             token |> fill_at(v.at)
             if v.init != null
                 token.value = v.init |> describe()
@@ -393,6 +396,7 @@ class AstData : AstVisitor
         token.name = "{svar.name}"
         if svar._type != null
             token.tdk = TypeDeclKey(svar._type)
+            token.alias = svar._type.alias |> string()
             token.isConst = svar._type.flags.constant
         *completion |> parse_typedecl(token.tdk, svar._type)
         token |> fill_at(svar.at)
@@ -411,8 +415,16 @@ class AstData : AstVisitor
         if expr.variable != null
             token.name = "{expr.variable.name}"
             token.declAt |> fill_at(expr.variable.at)
+            token.mod = expr.variable._module != null ? "{expr.variable._module.name}" : ""
+            if token.mod == ""
+                token.mod = funcModule
             if expr.variable.init != null
                 token.value = expr.variable.init |> describe()
+            if expr.variable._type != null
+                token.tdk = TypeDeclKey(expr.variable._type)
+                token.isConst = expr.variable._type.flags.constant
+                token.alias = expr.variable._type.alias |> string()
+                *completion |> parse_typedecl(token.tdk, expr.variable._type)
         // if expr._type != null
         //     token.isConst = expr._type.flags.constant
         //     token.tdk = TypeDeclKey(expr._type)
@@ -432,6 +444,8 @@ class AstData : AstVisitor
     //         skipExprs |> pop()
     //     return <- blk
 
+    funcModule : string
+
     def override preVisitFunction(fun : FunctionPtr) : void
         if fun.flags.generated && !fun.flags._generator && !fun.flags._lambda
             skipExprs |> push(true)
@@ -447,9 +461,11 @@ class AstData : AstVisitor
         if fun.result != null
             let tdk = TypeDeclKey(fun.result)
             token.tdk = tdk
+            token.alias = fun.result.alias |> string()
             token.isConst = fun.result.flags.constant
             *completion |> parse_typedecl(tdk, fun.result)
         token.mod = fun._module != null ? "{fun._module.name}" : ""
+        funcModule = token.mod
         token.declAt |> fill_at(fun.atDecl)
         token.value = "def {fun.name}("
         var first = true
@@ -478,9 +494,10 @@ class AstData : AstVisitor
         if arg.init != null
             token.value = "{arg.init |> describe()}"
         token.tdk = TypeDeclKey(arg._type)
+        token.alias = arg._type.alias |> string()
         token.isConst = arg._type.flags.constant
         *completion |> parse_typedecl(token.tdk, arg._type)
-        token.mod = arg._module != null ? "{arg._module.name}" : ""
+        token.mod = fun._module != null ? "{fun._module.name}" : ""
         token |> fill_at(arg.at)
         res.tokens |> emplace(token)
 
@@ -497,9 +514,12 @@ class AstData : AstVisitor
         if arg.init != null
             token.value = "{arg.init |> describe()}"
         token.tdk = TypeDeclKey(arg._type)
+        token.alias = arg._type.alias |> string()
         token.isConst = arg._type.flags.constant
         *completion |> parse_typedecl(token.tdk, arg._type)
         token.mod = arg._module != null ? "{arg._module.name}" : ""
+        if token.mod == ""
+            token.mod = funcModule
         token |> fill_at(arg.at)
         res.tokens |> emplace(token)
 
@@ -566,6 +586,7 @@ class AstData : AstVisitor
             if expr.subexpr._type != null
                 token.tdk = TypeDeclKey(expr.subexpr._type)
                 token.isConst = expr.subexpr._type.flags.constant
+                token.alias = expr.subexpr._type.alias |> string()
                 *completion |> parse_typedecl(token.tdk, expr.subexpr._type)
         token |> fill_at(expr.at)
         res.tokens |> emplace(token)

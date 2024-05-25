@@ -354,6 +354,13 @@ export function typeDeclDefinition(td: CompletionTypeDecl, cr: CompletionResult)
         else
             console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
     }
+    if (td.alias.length > 0) {
+        const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
+        if (td1)
+            return td1
+        // else
+        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}`)
+    }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)
     // 	if (func)
@@ -414,11 +421,11 @@ export function primitiveBaseType(td: CompletionTypeDecl, cr: CompletionResult):
     )
 }
 
-export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (td: CompletionTypeDecl, st: CompletionStruct, en: CompletionEnum) => void): void {
+export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (td: CompletionTypeDecl, st: CompletionStruct, en: CompletionEnum, tf: CompletionTypeDef) => void): void {
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st)
-            return cb(td, st, null)
+            return cb(td, st, null, null)
         else
             console.error(`typeDeclDocs: failed to find struct ${td.structName} in ${td.mod}`)
     }
@@ -426,9 +433,16 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (
     if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
         const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
         if (en)
-            return cb(td, null, en)
+            return cb(td, null, en, null)
         else
             console.error(`typeDeclDocs: failed to find enum ${td.enumName} in ${td.mod}`)
+    }
+    if (td.alias.length > 0) {
+        const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
+        if (td1)
+            return cb(td, null, null, td1)
+        // else
+        //     console.error(`typeDeclDocs: failed to find type ${td.alias} in ${td.mod}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => modPrefix(f.mod) + f.name === td.tdk)
@@ -460,11 +474,13 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (
 // TODO: print dim size
 export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): string {
     let res = ''
-    typeDeclIter(td, cr, function (td, st, en) {
+    typeDeclIter(td, cr, function (td, st, en, tf) {
         if (st)
             res += structDocs(st)
         if (en)
             res += enumDocs(en)
+        if (tf)
+            res += typedefDocs(tf)
     })
 
     if (res.length == 0) {
@@ -530,6 +546,18 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
         }
         else
             console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
+    }
+    if (td.alias.length > 0) {
+        const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
+        if (td1) {
+            const td2 = cr.typeDecls.find(t => t.tdk === td1.tdk)
+            if (td2)
+                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+            // else
+            //     console.error(`typeDeclDefinition: failed to find type ${td1.tdk} in ${td.mod}`)
+        }
+        // else
+        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)

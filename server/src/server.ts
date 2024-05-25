@@ -414,10 +414,9 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 						found = true
 					}
 				}
-				// or bitfield (or alias)
-				for (const td of fileData.completion.typeDecls) {
-					// if (td.baseType == BaseType.tBitfield && td.alias == call.obj) {
-					if (td.alias == call.obj) {
+				// or alias
+				for (const td of fileData.completion.typeDefs) {
+					if (td.name == call.obj) {
 						call.tdks.add(td.tdk)
 						found = true
 					}
@@ -761,15 +760,26 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	if (callChain.length === 0)
 		return null
 	const last = callChain[callChain.length - 1]
-	const resTdks = last.tokens.length > 0 ? last.tokens.map(it => it.tdk) : last.tdks
-
 	let res: Location[] = []
+
+	const resTdks = last.tokens.length > 0 ? last.tokens.map(it => it.tdk) : last.tdks
 	for (const resTdk of resTdks) {
 		for (const td of fileData.completion.typeDecls) {
 			if (td.tdk === resTdk) {
 				const pos = typeDeclDefinition(td, fileData.completion)
 				addValidLocation(res, pos)
+				break
 			}
+		}
+	}
+
+	const resAliases: Array<{ mod: string, name: string }> = last.tokens.length > 0 ? last.tokens.map(it => ({ mod: it.mod, name: it.alias })) : []
+	for (const resAlias of resAliases) {
+		if (resAlias.name.length === 0)
+			continue
+		const tf = fileData.completion.typeDefs.find(td => td.name === resAlias.name && td.mod === resAlias.mod)
+		if (tf != null) {
+			addValidLocation(res, tf)
 		}
 	}
 
@@ -855,10 +865,9 @@ connection.onDefinition(async (declarationParams) => {
 				addValidLocation(res, pos)
 			}
 			if (tok.alias.length > 0) {
-				const td = fileData.completion.typeDecls.find(td => td.alias === tok.alias)
+				const td = fileData.completion.typeDefs.find(td => td.name === tok.alias && td.mod === tok.mod)
 				if (td != null) {
-					const pos = typeDeclDefinition(td, fileData.completion)
-					addValidLocation(res, pos)
+					addValidLocation(res, td)
 				}
 			}
 		}
