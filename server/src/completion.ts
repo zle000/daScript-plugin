@@ -619,22 +619,23 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                 }
             }
         }
-    }
-
-    const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
-    const propertyPrefixes = propPrefix.length > 0 ? propPrefix : PROPERTY_PREFIXES
-    for (const propertyPrefix of propertyPrefixes) {
-        for (const fn of cr.functions) {
-            if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
-                const propertyName = fixPropertyName(fn.name)
-                const c = CompletionItem.create(propertyName)
-                c.kind = CompletionItemKind.Property
-                c.detail = funcDetail(fn)
-                c.documentation = funcDocs(fn)
-                c.data = fn.tdk
-                c.sortText = PROPERTY_SORT
-                c.insertText = c.label
-                res.push(c)
+    } else {
+        const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
+        const propertyPrefixes = propPrefix.length > 0 ? propPrefix :
+            (delimiter == Delimiter.Dot || delimiter == Delimiter.None) ? PROPERTY_PREFIXES : []
+        for (const propertyPrefix of propertyPrefixes) {
+            for (const fn of cr.functions) {
+                if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
+                    const propertyName = fixPropertyName(fn.name)
+                    const c = CompletionItem.create(propertyName)
+                    c.kind = CompletionItemKind.Property
+                    c.detail = funcDetail(fn)
+                    c.documentation = funcDocs(fn)
+                    c.data = fn.tdk
+                    c.sortText = PROPERTY_SORT
+                    c.insertText = c.label
+                    res.push(c)
+                }
             }
         }
     }
@@ -853,35 +854,35 @@ export function isPositionEqual(a: Position, b: Position) {
 }
 
 export function shortTdk(tdk: string): string {
-	const till = tdk.indexOf("<")
-	const skip = tdk.indexOf("::")
-	if (skip > 0 && (till < 0 || skip < till))
-		return tdk.substring(skip + 2)
-	return tdk
+    const till = tdk.indexOf("<")
+    const skip = tdk.indexOf("::")
+    if (skip > 0 && (till < 0 || skip < till))
+        return tdk.substring(skip + 2)
+    return tdk
 }
 
 export function closedBracketPos(doc: TextDocument, pos: Position): Position {
-	let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
-	let num = 0
-	// skip spaces
-	let i = 0
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (!isSpaceChar(ch))
-			break
-	}
+    let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
+    let num = 0
+    // skip spaces
+    let i = 0
+    for (; i < line.length; i++) {
+        const ch = line[i]
+        if (!isSpaceChar(ch))
+            break
+    }
 
-	if (line[i] != '(')
-		return pos
+    if (line[i] != '(')
+        return pos
 
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (ch == '(')
-			num++
-		else if (ch == ')')
-			num--
-		if (num == 0)
-			return Position.create(pos.line, pos.character + i + 1)
-	}
-	return pos
+    for (; i < line.length; i++) {
+        const ch = line[i]
+        if (ch == '(')
+            num++
+        else if (ch == ')')
+            num--
+        if (num == 0)
+            return Position.create(pos.line, pos.character + i + 1)
+    }
+    return pos
 }
