@@ -542,16 +542,23 @@ const OPERATOR_REMAP: Map<string, string> = new Map([
 	['?[]', '?['],
 ])
 
+function getGlobalCompletion(base : CompletionItem[] = null): CompletionItem[] {
+	if (base?.length > 0)
+		return base
+	const globs = validatingResults.get(globalCompletionFile.uri)
+	return globs ? globs.completionItems : []
+}
+
 connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	if (!doc)
-		return null
+		return getGlobalCompletion()
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
-		return null
+		return getGlobalCompletion()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	if (callChain.length === 0)
-		return fileData.completionItems
+		return getGlobalCompletion(fileData.completionItems)
 
 	const res: CompletionItem[] = []
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
@@ -595,7 +602,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 			}
 		}
 	}
-	return res.length > 0 ? res : fileData.completionItems
+	return res.length > 0 ? res : getGlobalCompletion(fileData.completionItems)
 })
 
 connection.onHover(async (textDocumentPosition) => {
