@@ -741,6 +741,17 @@ connection.onHover(async (textDocumentPosition) => {
 			}
 		}
 	}
+	// fallback logic, lets try to find any completion item with same name
+	if (res.length == 0 && last.obj.length > 0) {
+		for (const en of fileData.completionItems) {
+			if (en.label === last.obj && en.detail) {
+				if (!first)
+					res += '\n'
+				res += `\n${en.detail}`
+				break
+			}
+		}
+	}
 	if (res.length > 0)
 		return {
 			contents: { kind: 'markdown', value: '```dascript\n' + res + '\n```' },
@@ -784,9 +795,6 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	}
 
 	for (const tok of last.tokens) {
-		// if (res.declAt._uri?.length != 0 && !isRangeZeroEmpty(res.declAt._range))
-		// 	return Location.create(res.declAt._uri, res.declAt._range)		
-
 		if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
 			// it's fast :)
 			const st = fileData.completion.structs.find(st => st.name === tok.name && st.mod === tok.mod)
@@ -833,10 +841,6 @@ connection.onReferences(async (referencesParams) => {
 	return result
 })
 
-// connection.onDeclaration(async (declarationParams) => {
-// 	console.log('declaration', declarationParams)
-// 	return null
-// })
 connection.onDefinition(async (declarationParams) => {
 	const doc = documents.get(declarationParams.textDocument.uri)
 	if (!doc)
@@ -892,6 +896,7 @@ connection.onDefinition(async (declarationParams) => {
 					// TODO: find pos for field tdk.name
 					const pos = typeDeclDefinition(td, fileData.completion)
 					addValidLocation(res, pos)
+					break
 				}
 			}
 		}
@@ -1076,10 +1081,6 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	}
 	return res
 })
-
-// connection.onCompletionResolve((item) => {
-// 	return item
-// })
 
 connection.onInitialized(() => {
 	if (hasConfigurationCapability) {
@@ -1403,22 +1404,6 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				documentation: enumDocs(e),
 			})
 			addMod(e.mod, e)
-			// fixedResults.tokens.push({
-			// 	mod: e.mod,
-			// 	line: e.line,
-			// 	column: e.column,
-			// 	lineEnd: e.lineEnd,
-			// 	columnEnd: e.columnEnd,
-			// 	file: e.file,
-			// 	kind: 'ExprEnum',
-			// 	name: e.name,
-			// 	tdk: modPrefix(e.mod) + e.name,
-			// 	value: '',
-			// 	gen: false,
-			// 	_range: e._range,
-			// 	_uri: e._uri,
-			// 	declAt: e,
-			// })
 			for (const ev of e.values) {
 				ev._range = AtToRange(ev)
 				ev._uri = AtToUri(ev, uri, settings, res.dasRoot, fixedResults.filesCache)
@@ -1428,22 +1413,6 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					detail: enumValueDetail(ev),
 					documentation: enumValueDocs(ev, e),
 				})
-				// fixedResults.tokens.push({
-				// 	mod: e.mod,
-				// 	line: ev.line,
-				// 	column: ev.column,
-				// 	lineEnd: ev.lineEnd,
-				// 	columnEnd: ev.columnEnd,
-				// 	file: ev.file,
-				// 	kind: 'ExprEnumValue',
-				// 	name: ev.name,
-				// 	tdk: modPrefix(e.mod) + e.name,
-				// 	value: '',
-				// 	gen: false,
-				// 	_range: ev._range,
-				// 	_uri: ev._uri,
-				// 	declAt: ev,
-				// })
 			}
 		}
 		for (const s of res.completion.structs) {
