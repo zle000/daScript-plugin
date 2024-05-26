@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { shortTdk } from './completion'
 import { closedBracketPos } from './completion'
 
@@ -808,32 +808,30 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 })
 
 connection.onReferences(async (referencesParams) => {
-	const doc = documents.get(referencesParams.textDocument.uri)
-	if (!doc)
-		return null
 	const fileData = await getDocumentData(referencesParams.textDocument.uri)
 	if (!fileData)
 		return null
-	const callChain = findCallChain(doc, fileData, referencesParams.position, /*forAutocompletion*/false)
+	const doc = documents.get(fileData.uri)
+	if (!doc)
+		return null
+	const callChain = findCallChain(doc, fileData, referencesParams.position, false)
 	if (callChain.length === 0)
 		return null
-	const last = callChain[callChain.length - 1]
-	const foundTokens = last.tokens
 
 	let result: Location[] = []
-
-	for (const res of foundTokens) {
-		let declAt = res.kind === TokenKind.Func ? res : res.declAt
-		if (declAt.file.length === 0) {
+	for (const res of callChain[callChain.length - 1].tokens) {
+		let declAt = isValidLocation(res.declAt) && res.kind !== TokenKind.Func
+			? res.declAt
+			: res
+		if (!isValidLocation(declAt)) {
 			continue
 		}
+
 		result.push(Location.create(declAt._uri, declAt._range))
 
-		if (!isRangeZeroEmpty(declAt._range)) {
-			for (const td of fileData.tokens) {
-				if (isRangeEqual(declAt._range, td.declAt._range)) {
-					result.push(Location.create(td._uri, td._range))
-				}
+		for (const td of fileData.tokens) {
+			if (declAt._uri === td.declAt._uri && isRangeEqual(declAt._range, td.declAt._range)) {
+				result.push(Location.create(td._uri, td._range))
 			}
 		}
 	}

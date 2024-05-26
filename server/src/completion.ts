@@ -177,8 +177,12 @@ export interface CompletionAt {
     _originalText: string
 }
 
+export function isValidLocation(at : CompletionAt): boolean {
+    return at._uri.length > 0 && !isRangeZeroEmpty(at._range)
+}
+
 export function addValidLocation(res: Location[], at: CompletionAt): void {
-    if (at != null && at._uri.length > 0 && !isRangeZeroEmpty(at._range))
+    if (at != null && isValidLocation(at))
         res.push(Location.create(at._uri, at._range))
 }
 
