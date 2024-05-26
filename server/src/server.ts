@@ -1,8 +1,6 @@
 
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit,
-	InlayHint,
-	InlayHintKind,
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit, InlayHint, InlayHintKind,
 } from 'vscode-languageserver/node'
 
 import {
@@ -15,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, DasToken, Delimiter, EXTENSION_FN_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValid, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValid, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { shortTdk } from './completion'
 import { closedBracketPos } from './completion'
 
@@ -90,7 +88,7 @@ connection.onInitialize((params) => {
 		capabilities: {
 			completionProvider: {
 				resolveProvider: false,
-				triggerCharacters: ['.', ' ', '>'],
+				triggerCharacters: ['.', ' ', '>', ':'],
 			},
 			hoverProvider: true,
 			definitionProvider: true,
@@ -250,6 +248,10 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 			i -= 2
 			del = Delimiter.Pipe
 		}
+		else if (i > 0 && line[i] === ':' && line[i - 1] === ':') {
+			i -= 2
+			del = Delimiter.ColonColon
+		}
 		delimiterRange.start.character = i
 		if (del === Delimiter.None)
 			break
@@ -325,7 +327,7 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 		res.unshift({ obj: obj, objRange: objRange, tokens: [], tdks: new Set(), delimiter: del, brackets: brackets, delimiterRange: delimiterRange })
 	}
 
-	resolveChainTdks(doc, fileData, res, !forAutocompletion, recursion)
+	resolveChainTdks(doc, fileData, res, forAutocompletion, recursion)
 	return res
 }
 
@@ -412,10 +414,9 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 						found = true
 					}
 				}
-				// or bitfield (or alias)
-				for (const td of fileData.completion.typeDecls) {
-					// if (td.baseType == BaseType.tBitfield && td.alias == call.obj) {
-					if (td.alias == call.obj) {
+				// or alias
+				for (const td of fileData.completion.typeDefs) {
+					if (td.name == call.obj) {
 						call.tdks.add(td.tdk)
 						found = true
 					}
@@ -423,6 +424,17 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 				prevTdks = call.tdks
 				if (found)
 					continue
+			}
+			else if (call.brackets == Brackets.Round) {
+				for (const fn of fileData.completion.functions) {
+					if (fn.name == call.obj) {
+						call.tdks.add(fn.tdk)
+					}
+				}
+			}
+			else if (call.delimiter == Delimiter.ColonColon) {
+				// just skip module names
+				continue
 			}
 		}
 		// failed to resolve tdk
@@ -551,7 +563,7 @@ function findDeclarations(): DasToken[] {
 
 const OPERATORS = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
 	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
-	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", ":=", "<-",]
+	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", ":=", "<-", '^^=']
 
 const OPERATOR_REMAP: Map<string, string> = new Map([
 	['.', '.'],
@@ -560,16 +572,23 @@ const OPERATOR_REMAP: Map<string, string> = new Map([
 	['?[]', '?['],
 ])
 
+function getGlobalCompletion(base: CompletionItem[] = null): CompletionItem[] {
+	if (base?.length > 0)
+		return base
+	const globs = validatingResults.get(globalCompletionFile.uri)
+	return globs ? globs.completionItems : []
+}
+
 connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	if (!doc)
-		return null
+		return getGlobalCompletion()
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
-		return null
+		return getGlobalCompletion()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	if (callChain.length === 0)
-		return fileData.completionItems
+		return getGlobalCompletion(fileData.completionItems)
 
 	const res: CompletionItem[] = []
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
@@ -613,7 +632,49 @@ connection.onCompletion(async (textDocumentPosition) => {
 			}
 		}
 	}
-	return res.length > 0 ? res : fileData.completionItems
+	if (call.delimiter == Delimiter.ColonColon && call.obj.length > 0) {
+		for (const en of fileData.completion.enums) {
+			if (en.mod == call.obj) {
+				const c = CompletionItem.create(en.name)
+				c.detail = enumDetail(en)
+				c.documentation = enumDocs(en)
+				c.kind = CompletionItemKind.Enum
+				c.sortText = FIELD_SORT
+				res.push(c)
+			}
+		}
+		for (const st of fileData.completion.structs) {
+			if (st.mod === call.obj) {
+				const c = CompletionItem.create(st.name)
+				c.detail = structDetail(st)
+				c.documentation = structDocs(st)
+				c.kind = CompletionItemKind.Struct
+				c.sortText = FIELD_SORT
+				res.push(c)
+			}
+		}
+		for (const fn of fileData.completion.functions) {
+			if (fn.mod == call.obj) {
+				const c = CompletionItem.create(fn.name)
+				c.detail = funcDetail(fn)
+				c.documentation = funcDocs(fn)
+				c.kind = CompletionItemKind.Function
+				c.sortText = FIELD_SORT
+				res.push(c)
+			}
+		}
+		for (const td of fileData.completion.typeDefs) {
+			if (td.mod == call.obj) {
+				const c = CompletionItem.create(td.name)
+				c.detail = typedefDetail(td)
+				c.documentation = typedefDocs(td)
+				c.kind = CompletionItemKind.Interface
+				c.sortText = FIELD_SORT
+				res.push(c)
+			}
+		}
+	}
+	return res.length > 0 ? res : getGlobalCompletion(fileData.completionItems)
 })
 
 connection.onHover(async (textDocumentPosition) => {
@@ -717,15 +778,26 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	if (callChain.length === 0)
 		return null
 	const last = callChain[callChain.length - 1]
-	const resTdks = last.tokens.length > 0 ? last.tokens.map(it => it.tdk) : last.tdks
-
 	let res: Location[] = []
+
+	const resTdks = last.tokens.length > 0 ? last.tokens.map(it => it.tdk) : last.tdks
 	for (const resTdk of resTdks) {
 		for (const td of fileData.completion.typeDecls) {
 			if (td.tdk === resTdk) {
 				const pos = typeDeclDefinition(td, fileData.completion)
 				addValidLocation(res, pos)
+				break
 			}
+		}
+	}
+
+	const resAliases: Array<{ mod: string, name: string }> = last.tokens.length > 0 ? last.tokens.map(it => ({ mod: it.mod, name: it.alias })) : []
+	for (const resAlias of resAliases) {
+		if (resAlias.name.length === 0)
+			continue
+		const tf = fileData.completion.typeDefs.find(td => td.name === resAlias.name && td.mod === resAlias.mod)
+		if (tf != null) {
+			addValidLocation(res, tf)
 		}
 	}
 
@@ -803,10 +875,9 @@ connection.onDefinition(async (declarationParams) => {
 				addValidLocation(res, pos)
 			}
 			if (tok.alias.length > 0) {
-				const td = fileData.completion.typeDecls.find(td => td.alias === tok.alias)
+				const td = fileData.completion.typeDefs.find(td => td.name === tok.alias && td.mod === tok.mod)
 				if (td != null) {
-					const pos = typeDeclDefinition(td, fileData.completion)
-					addValidLocation(res, pos)
+					addValidLocation(res, td)
 				}
 			}
 		}
@@ -1319,7 +1390,19 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				fixedResults.completion.functions.unshift(...globs.completion.functions)
 			}
 		}
+		const modules = new Set<string>()
 		const map = new Array<Map<string, CompletionItem>>()
+		function addMod(name: string, at: CompletionAt) {
+			if (name?.length > 0 && !modules.has(name)) {
+				modules.add(name)
+				addCompletionItem(map, {
+					label: name,
+					kind: CompletionItemKind.Module,
+					detail: `module ${name}`,
+					documentation: `module ${name}\n${at.file}`,
+				})
+			}
+		}
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)
 			e._uri = AtToUri(e, uri, settings, res.dasRoot, fixedResults.filesCache)
@@ -1329,6 +1412,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				detail: enumDetail(e),
 				documentation: enumDocs(e),
 			})
+			addMod(e.mod, e)
 			// fixedResults.tokens.push({
 			// 	mod: e.mod,
 			// 	line: e.line,
@@ -1382,6 +1466,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				detail: structDetail(s),
 				documentation: structDocs(s),
 			})
+			addMod(s.mod, s)
 			for (const sf of s.fields) {
 				// TODO: search for the field end using textDocument.getText()
 				// sf.columnEnd += sf.tdk.length + 1 // 1 char for ':'
@@ -1423,6 +1508,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				detail: typedefDetail(t),
 				documentation: typedefDocs(t),
 			})
+			addMod(t.mod, t)
 		}
 		for (const g of res.completion.globals) {
 			g._range = AtToRange(g)
@@ -1433,6 +1519,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				detail: globalDetail(g),
 				documentation: globalDocs(g),
 			})
+			addMod(g.mod, g)
 		}
 		for (const f of res.completion.functions) {
 			f._range = AtToRange(f)
@@ -1490,6 +1577,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				detail: funcDetail(f),
 				documentation: funcDocs(f),
 			})
+			addMod(f.mod, f)
 			for (const arg of f.args) {
 				arg._range = AtToRange(arg)
 				arg._uri = AtToUri(arg, uri, settings, res.dasRoot, fixedResults.filesCache)

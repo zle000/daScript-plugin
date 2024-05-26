@@ -16,6 +16,7 @@ export enum Delimiter {
     Is = 'is',
     QuestionAs = '?as',
     Pipe = '|>',
+    ColonColon = '::',
 }
 
 export enum Brackets {
@@ -357,6 +358,13 @@ export function typeDeclDefinition(td: CompletionTypeDecl, cr: CompletionResult)
         else
             console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
     }
+    if (td.alias.length > 0) {
+        const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
+        if (td1)
+            return td1
+        // else
+        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}`)
+    }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)
     // 	if (func)
@@ -417,11 +425,11 @@ export function primitiveBaseType(td: CompletionTypeDecl, cr: CompletionResult):
     )
 }
 
-export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (td: CompletionTypeDecl, st: CompletionStruct, en: CompletionEnum) => void): void {
+export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (td: CompletionTypeDecl, st: CompletionStruct, en: CompletionEnum, tf: CompletionTypeDef) => void): void {
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st)
-            return cb(td, st, null)
+            return cb(td, st, null, null)
         else
             console.error(`typeDeclDocs: failed to find struct ${td.structName} in ${td.mod}`)
     }
@@ -429,9 +437,16 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (
     if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
         const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
         if (en)
-            return cb(td, null, en)
+            return cb(td, null, en, null)
         else
             console.error(`typeDeclDocs: failed to find enum ${td.enumName} in ${td.mod}`)
+    }
+    if (td.alias.length > 0) {
+        const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
+        if (td1)
+            return cb(td, null, null, td1)
+        // else
+        //     console.error(`typeDeclDocs: failed to find type ${td.alias} in ${td.mod}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => modPrefix(f.mod) + f.name === td.tdk)
@@ -463,11 +478,13 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (
 // TODO: print dim size
 export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): string {
     let res = ''
-    typeDeclIter(td, cr, function (td, st, en) {
+    typeDeclIter(td, cr, function (td, st, en, tf) {
         if (st)
             res += structDocs(st)
         if (en)
             res += enumDocs(en)
+        if (tf)
+            res += typedefDocs(tf)
     })
 
     if (res.length == 0) {
@@ -533,6 +550,18 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
         }
         else
             console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
+    }
+    if (td.alias.length > 0) {
+        const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
+        if (td1) {
+            const td2 = cr.typeDecls.find(t => t.tdk === td1.tdk)
+            if (td2)
+                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+            // else
+            //     console.error(`typeDeclDefinition: failed to find type ${td1.tdk} in ${td.mod}`)
+        }
+        // else
+        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)
@@ -623,22 +652,23 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
                 }
             }
         }
-    }
-
-    const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
-    const propertyPrefixes = propPrefix.length > 0 ? propPrefix : PROPERTY_PREFIXES
-    for (const propertyPrefix of propertyPrefixes) {
-        for (const fn of cr.functions) {
-            if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
-                const propertyName = fixPropertyName(fn.name)
-                const c = CompletionItem.create(propertyName)
-                c.kind = CompletionItemKind.Property
-                c.detail = funcDetail(fn)
-                c.documentation = funcDocs(fn)
-                c.data = fn.tdk
-                c.sortText = PROPERTY_SORT
-                c.insertText = c.label
-                res.push(c)
+    } else {
+        const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
+        const propertyPrefixes = propPrefix.length > 0 ? propPrefix :
+            (delimiter == Delimiter.Dot || delimiter == Delimiter.None) ? PROPERTY_PREFIXES : []
+        for (const propertyPrefix of propertyPrefixes) {
+            for (const fn of cr.functions) {
+                if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
+                    const propertyName = fixPropertyName(fn.name)
+                    const c = CompletionItem.create(propertyName)
+                    c.kind = CompletionItemKind.Property
+                    c.detail = funcDetail(fn)
+                    c.documentation = funcDocs(fn)
+                    c.data = fn.tdk
+                    c.sortText = PROPERTY_SORT
+                    c.insertText = c.label
+                    res.push(c)
+                }
             }
         }
     }
@@ -670,15 +700,16 @@ export function fixPropertyName(op: string) {
 
 export interface CompletionTypeDef extends CompletionAt {
     name: string
+    mod: string
     tdk: string
 }
 
 export function typedefDetail(t: CompletionTypeDef) {
-    return `typedef ${t.name} = ${t.tdk}`
+    return `typedef ${modPrefix(t.mod)}${t.name} = ${t.tdk}`
 }
 
 export function typedefDocs(t: CompletionTypeDef) {
-    return `typedef ${t.name} = ${t.tdk}`
+    return `typedef ${modPrefix(t.mod)}${t.name} = ${t.tdk}`
 }
 
 export interface CompletionFuncArg extends CompletionAt {
@@ -715,11 +746,11 @@ function funcRetTypeSuffix(retType: string) {
 }
 
 export function funcDetail(f: CompletionFunction) {
-    return `def ${f.name}(${f.args.map(a => `${a.name}: ${a.tdk}`).join('; ')})${funcRetTypeSuffix(f.tdk)}`
+    return `def ${modPrefix(f.mod)}${f.name}(${f.args.map(a => `${a.name}: ${a.tdk}`).join('; ')})${funcRetTypeSuffix(f.tdk)}`
 }
 
 export function funcDocs(f: CompletionFunction) {
-    let res = `def ${f.name}(${f.args.map(a => `${a.name}: ${a.tdk}`).join('; ')})${funcRetTypeSuffix(f.tdk)}`
+    let res = `def ${modPrefix(f.mod)}${f.name}(${f.args.map(a => `${a.name}: ${a.tdk}`).join('; ')})${funcRetTypeSuffix(f.tdk)}`
     if (f.cpp.length > 0)
         res += `\n[::${f.cpp}(...)]`
     return res
@@ -857,35 +888,35 @@ export function isPositionEqual(a: Position, b: Position) {
 }
 
 export function shortTdk(tdk: string): string {
-	const till = tdk.indexOf("<")
-	const skip = tdk.indexOf("::")
-	if (skip > 0 && (till < 0 || skip < till))
-		return tdk.substring(skip + 2)
-	return tdk
+    const till = tdk.indexOf("<")
+    const skip = tdk.indexOf("::")
+    if (skip > 0 && (till < 0 || skip < till))
+        return tdk.substring(skip + 2)
+    return tdk
 }
 
 export function closedBracketPos(doc: TextDocument, pos: Position): Position {
-	let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
-	let num = 0
-	// skip spaces
-	let i = 0
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (!isSpaceChar(ch))
-			break
-	}
+    let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
+    let num = 0
+    // skip spaces
+    let i = 0
+    for (; i < line.length; i++) {
+        const ch = line[i]
+        if (!isSpaceChar(ch))
+            break
+    }
 
-	if (line[i] != '(')
-		return pos
+    if (line[i] != '(')
+        return pos
 
-	for (; i < line.length; i++) {
-		const ch = line[i]
-		if (ch == '(')
-			num++
-		else if (ch == ')')
-			num--
-		if (num == 0)
-			return Position.create(pos.line, pos.character + i + 1)
-	}
-	return pos
+    for (; i < line.length; i++) {
+        const ch = line[i]
+        if (ch == '(')
+            num++
+        else if (ch == ')')
+            num--
+        if (num == 0)
+            return Position.create(pos.line, pos.character + i + 1)
+    }
+    return pos
 }
