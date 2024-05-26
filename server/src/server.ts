@@ -812,8 +812,6 @@ connection.onReferences(async (referencesParams) => {
 
 	let result: Location[] = []
 	for (const res of callChain[callChain.length - 1].tokens) {
-		console.log("[onReferences] Found token", res)
-
 		let declAt = isValidLocation(res.declAt) && res.kind !== TokenKind.Func
 			? res.declAt
 			: res
