@@ -557,10 +557,6 @@ async function getTokenData(uri : string, position : Position): Promise<[FixedVa
 	return [fileData, doc, callChain]
 }
 
-function findDeclarations(): DasToken[] {
-	return []
-}
-
 const OPERATORS = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
 	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
 	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", ":=", "<-", '^^=']
