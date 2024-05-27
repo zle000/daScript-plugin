@@ -177,7 +177,7 @@ export interface CompletionAt {
     _originalText: string
 }
 
-export function isValidLocation(at : CompletionAt): boolean {
+export function isValidLocation(at: CompletionAt): boolean {
     return at._uri.length > 0 && !isRangeZeroEmpty(at._range)
 }
 
@@ -507,6 +507,13 @@ export const OPERATOR_SORT = '4'
 
 // returns actual CompletionTypeDecl
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
+    return typeDeclCompletion_(td, cr, delimiter, brackets, 0, res)
+}
+function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, depth: number, res: CompletionItem[]): CompletionTypeDecl {
+    if (depth > 50) {
+        console.error(`typeDeclCompletion: recursion depth exceeded for ${td.tdk}`)
+        return td
+    }
     let resultTd = td
     const dotDel = delimiter == Delimiter.Dot
     const qDotDel = delimiter == Delimiter.QuestionDot
@@ -555,8 +562,8 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
         const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
         if (td1) {
             const td2 = cr.typeDecls.find(t => t.tdk === td1.tdk)
-            if (td2)
-                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+            if (td2 && td2 != td)
+                resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
             // else
             //     console.error(`typeDeclDefinition: failed to find type ${td1.tdk} in ${td.mod}`)
         }
@@ -574,7 +581,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     if ((td.baseType === BaseType.tPointer || ((td.baseType === BaseType.tArray || td.dim.length > 0) && (brackets == Brackets.Square || brackets == Brackets.QuestionSquare))) && td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
-            resultTd = typeDeclCompletion(td1, cr, delimiter, Brackets.None, res)
+            resultTd = typeDeclCompletion_(td1, cr, delimiter, Brackets.None, depth + 1, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
@@ -582,7 +589,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
     if (td.baseType === BaseType.tTable && (brackets == Brackets.Square || brackets == Brackets.QuestionSquare) && td.dim.length == 0 && td.tdk1.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
-            resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+            resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
@@ -624,23 +631,23 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             }
             // const td2 = cr.typeDecls.find(t => t.tdk === type)
             // if (td2)
-            //     resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+            //     resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         }
         else if (td.baseType == BaseType.tRange64) {
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tInt64)
             if (td2)
-                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+                resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         }
         else if (td.baseType == BaseType.tURange64) {
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
             if (td2)
-                resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+                resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         }
     }
     if (delimiter == Delimiter.Is) {
         const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tBool)
         if (td2 && td2 != td)
-            resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+            resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
     }
     let searchOperatorName = brackets == Brackets.Square ? '[]' : brackets == Brackets.QuestionSquare ? '?[]' : ''
     if (searchOperatorName.length > 0) {
@@ -648,7 +655,7 @@ export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult,
             if (fn.args.length > 0 && fn.name == searchOperatorName && fn.args[0].tdk === td.tdk) {
                 const td2 = cr.typeDecls.find(t => t.tdk === fn.tdk)
                 if (td2) {
-                    resultTd = typeDeclCompletion(td2, cr, delimiter, Brackets.None, res)
+                    resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
                 }
             }
         }

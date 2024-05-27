@@ -44,7 +44,7 @@ def fill_at(var res; at : LineInfo?)
     if at != null
         fill_at(res, at)
 
-def fill_at(var res; at : LineInfo)
+def fill_at(var res : CompletionAt&; at : LineInfo)
     res.file = at.fileInfo != null ? "{at.fileInfo.name}" : ""
     res.line = at.line |> int()
     res.column = at.column |> int()
@@ -212,8 +212,13 @@ def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Struct
     res.result.structs |> emplace(st)
 
 /// type decl
-def cleanupTDK(res : string) : string
-    return replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
+def cleanupTDK(str : string) : string
+    var parts <- str |> split("const?")
+        
+    for res in parts
+        res = replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
+
+    return parts |> join("const?")
 
 def TypeDeclKey(t : smart_ptr<ast::TypeDecl>&)
     return t |> describe_typedecl(false, false, true) |> cleanupTDK()

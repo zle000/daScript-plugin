@@ -137,7 +137,8 @@ function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: 
 	return findCallChain_(doc, fileData, pos, forAutocompletion, 0)
 }
 function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean, recursion: number): CallChain[] {
-	if (recursion > 10) {
+	if (recursion > 20) {
+		console.error('recursion limit reached. In file ', fileData.uri, ' at position ', pos.line, pos.character)
 		return []
 	}
 	/// find chain of fields access - foo.key or foo().key  ... etc
@@ -696,7 +697,7 @@ connection.onHover(async (textDocumentPosition) => {
 			if (func != null && func.cpp.length > 0)
 				res += `\n[::${func.cpp}(...)]`
 		}
-		else if (tok.tdk.length > 0) {
+		else if (tok.kind != TokenKind.Func && tok.tdk.length > 0) {
 			const showBaseType = tok.kind != TokenKind.ExprAddr
 			for (const td of fileData.completion.typeDecls) {
 				if (td.tdk === tok.tdk) {
