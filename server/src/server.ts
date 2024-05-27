@@ -49,16 +49,15 @@ documents.onDidChangeContent((event) => {
 	updateDocumentData(event.document)
 })
 
-// Only keep settings for open documents
 documents.onDidClose(e => {
-	documentSettings.delete(e.document.uri)
-	const prevProcess = validatingProcesses.get(e.document.uri)
-	if (prevProcess != null) {
-		prevProcess.process?.kill()
-		console.log('killed process for', e.document.uri)
-		validatingProcesses.delete(e.document.uri)
-	}
-	validatingResults.delete(e.document.uri) // TODO: remove only tokens?
+	// documentSettings.delete(e.document.uri)
+	// const prevProcess = validatingProcesses.get(e.document.uri)
+	// if (prevProcess != null) {
+	// 	prevProcess.process?.kill()
+	// 	console.log('killed process for', e.document.uri)
+	// 	validatingProcesses.delete(e.document.uri)
+	// }
+	// validatingResults.delete(e.document.uri) // TODO: remove only tokens?
 	connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] })
 })
 
@@ -742,10 +741,10 @@ connection.onHover(async (textDocumentPosition) => {
 			}
 		}
 	}
-	// fallback logic, lets try to find any completion item with same name
+	// fallback logic, lets try to find module with same name
 	if (res.length == 0 && last.obj.length > 0) {
 		for (const en of fileData.completionItems) {
-			if (en.label === last.obj && en.detail) {
+			if (en.kind == CompletionItemKind.Module && en.label === last.obj && en.detail) {
 				if (!first)
 					res += '\n'
 				res += `\n${en.detail}`
@@ -1293,20 +1292,24 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				for (const error of result.errors) {
 					error._range = AtToRange(error)
 					error._uri = AtToUri(error, textDocument.uri, settings, result.dasRoot)
+					if (error._uri.length === 0)
+						error._uri = textDocument.uri
 
-					const diag: Diagnostic = { range: error._range, message: error.what, code: error.cerr, severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning }
+					let msg = error.what.trim()
 					if (error.extra?.length > 0 || error.fixme?.length > 0) {
-						const info: DiagnosticRelatedInformation[] = []
-						let lines: string[] = []
+						var suffix = ''
 						if (error.extra?.length > 0)
-							lines = error.extra.split('\n')
+							suffix += error.extra.trim()
 						if (error.fixme?.length > 0)
-							lines = lines.concat(error.fixme.split('\n'))
-						for (const line of lines) {
-							if (line.trim().length !== 0)
-								info.push({ location: { uri: error._uri, range: error._range }, message: line })
-						}
-						diag.relatedInformation = info
+							suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
+
+						msg = `${msg}\n\n${suffix}`
+					}
+					const diag: Diagnostic = {
+						range: error._range,
+						message: msg,
+						code: error.cerr,
+						severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
 					}
 					if (!diagnostics.has(error._uri))
 						diagnostics.set(error._uri, [])
