@@ -25,6 +25,7 @@ const connection = createConnection(ProposedFeatures.all)
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument)
 
 const validatingResults: Map<string/*uri*/, FixedValidationResult> = new Map()
+const autoFormatResult: Map<string/*uri*/, string> = new Map()
 
 // The workspace folder this server is operating on
 let workspaceFolders: WorkspaceFolder[] | null
@@ -98,6 +99,7 @@ connection.onInitialize((params) => {
 			inlayHintProvider: {
 				resolveProvider: false,
 			},
+			documentFormattingProvider: true,
 			// colorProvider: true,
 			// documentHighlightProvider : true, // TODO: implement
 			// workspace: {
@@ -543,9 +545,9 @@ function fixCompletion(c: CompletionItem, newText: string, replaceStart: Positio
 	}
 }
 
-const OPERATORS = ["!", "~", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&&=", "||=", "^^=", "&&", "||", "^^", "+", "-",
-	"*", "/", "%", "<", ">", "==", "!=", "<=", ">=", "&", "|", "^", "++", "--", "+++", "---", "<<", ">>", "<<=",
-	">>=", "<<<", ">>>", "<<<=", ">>>=", "[]", "?[]", ".", "?.", "??", ":=", "<-", '^^=']
+const OPERATORS = ['!', '~', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '&&=', '||=', '^^=', '&&', '||', '^^', '+', '-',
+	'*', '/', '%', '<', '>', '==', '!=', '<=', '>=', '&', '|', '^', '++', '--', '+++', '---', '<<', '>>', '<<=',
+	'>>=', '<<<', '>>>', '<<<=', '>>>=', '[]', '?[]', '.', '?.', '??', ':=', '<-', '^^=']
 
 const OPERATOR_REMAP: Map<string, string> = new Map([
 	['.', '.'],
@@ -1024,6 +1026,19 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	return res
 })
 
+connection.onDocumentFormatting(async (formatParams) => {
+	const doc = documents.get(formatParams.textDocument.uri)
+	if (!doc)
+		return null
+	await validateTextDocument(doc, { autoFormat: true })
+	const newText = autoFormatResult.get(formatParams.textDocument.uri)
+	autoFormatResult.delete(globalCompletionFile.uri)
+	if (newText == null)
+		return null
+	const allTextRange = Range.create(Position.create(0, 0), doc.positionAt(doc.getText().length))
+	return [{ newText: newText, range: allTextRange }]
+})
+
 connection.languages.inlayHint.on(async (inlayHintParams) => {
 	const doc = documents.get(inlayHintParams.textDocument.uri)
 	if (!doc)
@@ -1179,23 +1194,26 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
-async function validateTextDocument(textDocument: TextDocument): Promise<void> {
-	const prevProcess = validatingProcesses.get(textDocument.uri)
-	console.log('prevProcess version', prevProcess?.version ?? -1)
-	if (prevProcess != null) {
-		if (prevProcess.version === textDocument.version) {
-			console.log('document version not changed, ignoring', textDocument.uri)
-			return prevProcess.promise
+async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat: boolean } = { autoFormat: false }): Promise<void> {
+	const extraAction = extra.autoFormat
+	if (!extraAction) {
+		const prevProcess = validatingProcesses.get(textDocument.uri)
+		console.log('prevProcess version', prevProcess?.version ?? -1)
+		if (prevProcess != null) {
+			if (prevProcess.version === textDocument.version) {
+				console.log('document version not changed, ignoring', textDocument.uri)
+				return prevProcess.promise
+			}
+			prevProcess.process?.kill()
+			validatingProcesses.delete(textDocument.uri)
+			console.log('killed process for', textDocument.uri)
 		}
-		prevProcess.process?.kill()
-		validatingProcesses.delete(textDocument.uri)
-		console.log('killed process for', textDocument.uri)
-	}
-	const validResult = validatingResults.get(textDocument.uri)
-	// console.log('validResult', validResult)
-	if (validResult?.fileVersion === textDocument.version) {
-		console.log('document version not changed, ignoring', textDocument.uri)
-		return Promise.resolve()
+		const validResult = validatingResults.get(textDocument.uri)
+		// console.log('validResult', validResult)
+		if (validResult?.fileVersion === textDocument.version) {
+			console.log('document version not changed, ignoring', textDocument.uri)
+			return Promise.resolve()
+		}
 	}
 	const settings = await getDocumentSettings(textDocument.uri)
 
@@ -1235,6 +1253,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		const fixedRoot = settings.project.fileAccessRoots[rootName].replace('${workspaceFolder}', workspaceFolder)
 		args.push('--file-access-root', `${rootName}:${fixedRoot}`)
 	}
+	if (extra.autoFormat)
+		args.push('--auto-format')
 
 	const scriptPath = process.argv[1]
 	const cwd = path.dirname(path.dirname(scriptPath))
@@ -1242,7 +1262,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 	console.log('> cwd', cwd)
 	console.log('> exec', settings.compiler, args.join(' '))
 	const vp: ValidatingProcess = { process: null, version: textDocument.version, promise: null }
-	validatingProcesses.set(textDocument.uri, vp)
+	if (!extraAction)
+		validatingProcesses.set(textDocument.uri, vp)
 	const child = spawn(settings.compiler, args, { cwd: cwd })
 	vp.process = child
 
@@ -1269,11 +1290,19 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 			if (exitCode === null) {
 				console.log('Validation process exited with code', exitCode)
+				resolve()
+				return
+			}
+
+			if (extra.autoFormat) {
+				autoFormatResult.set(textDocument.uri, validateTextResult)
+				resolve()
 				return
 			}
 
 			if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
 				console.log('document version changed, ignoring result', textDocument.uri)
+				resolve()
 				return
 			}
 

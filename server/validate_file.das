@@ -13,6 +13,7 @@ require uriparser
 require daslib/ast_boost
 require daslib/strings_boost
 require daslib/json_boost
+require daslib/das_source_formatter
 require completion_boost
 
 def arg_value(args : array<string>; name : string; default_value : string) : string
@@ -36,6 +37,7 @@ struct ValidateConfig
     noUnusedFunctionArguments : bool
     failOnLackOfAotExport : bool
     globalCompletion : bool
+    autoFormat : bool
 
     fileAccessRoots : table<string; string>
 
@@ -67,12 +69,13 @@ def main()
     config.noUnusedFunctionArguments = args |> has_value("--no-unused-function-arguments")
     config.failOnLackOfAotExport = args |> has_value("--fail-on-lack-of-aot-export")
     config.globalCompletion = args |> has_value("--global-completion")
+    config.autoFormat = args |> has_value("--auto-format")
 
-    var res <- ValidationResult()
+    var res : ValidationResult
     res |> compile(config)
     res.dasRoot = get_das_root()
 
-    let textRes = res |> to_json()
+    let textRes = config.autoFormat ? res.autoFormat : res |> to_json()
 
     if WRITE_RESULT_TO_FILE
         mkdir("results")
@@ -104,6 +107,7 @@ struct ValidationResult
     errors : array<DasError>
     completion : CompletionResult
     dasRoot : string
+    autoFormat : string
 
 
 def init_file_access(var access; fileAccessorRoots : table<string; string>)
@@ -120,6 +124,10 @@ def compile(var res : ValidationResult; config : ValidateConfig)
             res.errors |> emplace([[DasError() what = "unable to open file '{config.file}'" ]])
             return
         fmap(fr) <| $(fileCont)
+
+            if config.autoFormat
+                res.autoFormat = das_source_formatter::format_source(fileCont)
+                return
 
             var inscope access <- make_file_access(config.projectFile)
             access |> set_file_source(config.originalFile, string(fileCont))
