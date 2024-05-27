@@ -214,7 +214,7 @@ def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Struct
 /// type decl
 def cleanupTDK(str : string) : string
     var parts <- str |> split("const?")
-        
+
     for res in parts
         res = replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
 
@@ -252,7 +252,7 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
     // if t.argNames |> length() > 0
     var td <- [[CompletionTypeDecl() tdk=tdk, baseType=BaseTypeString(t.baseType)]]
     let totalArgs = min(length(t.argNames), length(t.argTypes))
-    for idx,argN, argT in count(), t.argNames, t.argTypes
+    for idx, argN, argT in count(), t.argNames, t.argTypes
         var tf <- [[CompletionTypeDeclField() name=length(argN) > 0 ? "{argN}" : "_{idx}"]]
         tf.tdk = TypeDeclKey(argT)
         res |> parse_typedecl(tf.tdk, argT)
@@ -362,7 +362,7 @@ def parse_annotation(var res : CompletionContext; ann : Annotation&)
         var st <- [[CompletionStruct() name="{sann.name}"]]
         if ann._module != null
             st.mod = ann._module.name |> string()
-        for_each_field(sann) <| $[unused_argument(cppName)](name, cppName, xtype, offset)
+        for_each_field(sann) <| $ [unused_argument(cppName)] (name, cppName, xtype, offset)
             var field <- [[CompletionStructField() name="{name}"]]
             field.tdk = TypeDeclKey(xtype)
             res |> parse_typedecl(field.tdk, xtype)

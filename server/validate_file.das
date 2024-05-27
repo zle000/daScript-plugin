@@ -349,7 +349,7 @@ class AstData : AstVisitor
     //         return
     //     preVisitExprLooksLikeCall_(expr |> get_ptr())
 
-    def preVisitExprCallFunc(expr:ExprCallFunc?): void
+    def preVisitExprCallFunc(expr : ExprCallFunc?) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken(expr, completion)
@@ -374,12 +374,12 @@ class AstData : AstVisitor
                 *completion |> parse_typedecl(restdk, expr.func.result)
         res.tokens |> emplace(token)
 
-    def override preVisitExprCall(expr:smart_ptr<ExprCall>): void
+    def override preVisitExprCall(expr : smart_ptr<ExprCall>) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         preVisitExprCallFunc(expr |> get_ptr())
 
-    def override preVisitExprLet(expr:smart_ptr<ExprLet>) : void
+    def override preVisitExprLet(expr : smart_ptr<ExprLet>) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         for v in expr.variables
@@ -415,7 +415,7 @@ class AstData : AstVisitor
         res.tokens |> emplace(token)
 
 
-    def override preVisitExprVar(expr:smart_ptr<ExprVar>) : void
+    def override preVisitExprVar(expr : smart_ptr<ExprVar>) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken(expr, completion)
@@ -493,7 +493,7 @@ class AstData : AstVisitor
         res.tokens |> emplace(token)
 
 
-    [unused_argument(lastArg)] def override preVisitFunctionArgument(fun:FunctionPtr;arg:VariablePtr;lastArg:bool) : void
+    [unused_argument(lastArg)] def override preVisitFunctionArgument(fun : FunctionPtr; arg : VariablePtr; lastArg : bool) : void
         if length(skipExprs) > 0 || fun == null || fun.flags.generated || arg.flags.generated
             return
         var token <- DasToken()
@@ -513,7 +513,7 @@ class AstData : AstVisitor
         delete skipExprs
         return <- fun
 
-    [unused_argument(lastArg)] def override preVisitExprBlockArgument(blk:smart_ptr<ExprBlock>;arg:VariablePtr;lastArg:bool): void
+    [unused_argument(lastArg)] def override preVisitExprBlockArgument(blk : smart_ptr<ExprBlock>; arg : VariablePtr; lastArg : bool) : void
         if length(skipExprs) > 0 || blk == null || blk.genFlags.generated || arg.flags.generated
             return
         var token <- DasToken()
@@ -583,7 +583,7 @@ class AstData : AstVisitor
     // - functions
     // - operators (Op1, Op2)
 
-    def override preVisitExprAssume(expr:smart_ptr<ExprAssume>) : void
+    def override preVisitExprAssume(expr : smart_ptr<ExprAssume>) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken(expr, completion)
