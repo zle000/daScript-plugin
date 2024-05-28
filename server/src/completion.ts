@@ -135,13 +135,18 @@ export interface DasToken extends CompletionAt {
     declAt: CompletionAt
 }
 
-export function describeToken(tok: DasToken) {
+export function describeToken(tok: DasToken, cr: CompletionResult) {
     // cursed code, but it works
     let res = ''
     if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.Func)
         res += tok.value
-    else if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle)
-        res += `struct ${tok.name}`
+    else if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
+        const st = cr.structs.find(s => s.name === tok.name && s.mod === tok.mod)
+        if (st)
+            res += structDetail(st)
+        else
+            res += `struct ${tok.name}`
+    }
     else if (tok.kind == TokenKind.Typedecl)
         res += tok.tdk
     else {

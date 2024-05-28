@@ -210,7 +210,7 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 		// 		break
 		// }
 	}
-	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: tokens, tdks: new Set(tokens.map(it => it.tdk)), delimiter: del, brackets: Brackets.None, delimiterRange: Range.create(0, 0, 0, 0) }
+	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: tokens, tdks: tokensToTdks(tokens), delimiter: del, brackets: Brackets.None, delimiterRange: Range.create(0, 0, 0, 0) }
 
 	let res: CallChain[] = [keyData]
 	while (i > 0) {
@@ -334,6 +334,15 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 	return res
 }
 
+function tokensToTdks(tokens: DasToken[]): Set<string> {
+	const res = new Set<string>()
+	for (const tok of tokens) {
+		if (tok.tdk.length > 0)
+			res.add(tok.tdk)
+	}
+	return res
+}
+
 function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, callChain: CallChain[], forAutocompletion: boolean, recursion = 0): void {
 	if (callChain.length === 0)
 		return
@@ -357,17 +366,21 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 		idx++
 		// maybe already exists token
 		if (call.tokens.length > 0) {
-			call.tdks = new Set(call.tokens.map(it => it.tdk))
+			call.tdks = tokensToTdks(call.tokens)
 			prevTdks = call.tdks
 			continue
 		}
 		// don't change here anything, it works fine
 		const searchPos = call.delimiter.length > 1 && prevDelimiterRange ? rangeCenter(prevDelimiterRange) : call.objRange.start
-		const cursorTokens = findTokensUnderCursor(doc, fileData, searchPos)
+		let cursorTokens = findTokensUnderCursor(doc, fileData, searchPos)
+		if (cursorTokens.length == 0 && searchPos != call.objRange.start) {
+			cursorTokens = findTokensUnderCursor(doc, fileData, call.objRange.start)
+		}
 		if (cursorTokens.length > 0) {
 			for (const cursorTok of cursorTokens) {
 				call.tokens.push(cursorTok)
-				call.tdks.add(cursorTok.tdk)
+				if (cursorTok.tdk.length > 0)
+					call.tdks.add(cursorTok.tdk)
 			}
 			if (call.tokens.length > 0) {
 				prevTdks = call.tdks
@@ -378,7 +391,7 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 			const tokens = call.tokens.length > 0 ? call.tokens : findNearestTokensAt(doc, fileData, call, recursion)
 			if (tokens.length > 0) {
 				call.tokens = tokens
-				call.tdks = new Set(tokens.map(it => it.tdk))
+				call.tdks = tokensToTdks(call.tokens)
 				prevTdks = call.tdks
 				continue
 			}
@@ -398,7 +411,7 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 							if (it.label == call.obj) {
 								if (prevDelimiter == Delimiter.Is)
 									call.tdks.add(BaseType.tBool)
-								else
+								else if (it.data?.length > 0)
 									call.tdks.add(it.data)
 							}
 						}
@@ -412,14 +425,14 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 				// maybe enum
 				let found = false
 				for (const en of fileData.completion.enums) {
-					if (en.name === call.obj) {
+					if (en.name === call.obj && en.tdk.length > 0) {
 						call.tdks.add(en.tdk)
 						found = true
 					}
 				}
 				// or alias
 				for (const td of fileData.completion.typeDefs) {
-					if (td.name == call.obj) {
+					if (td.name == call.obj && td.tdk.length > 0) {
 						call.tdks.add(td.tdk)
 						found = true
 					}
@@ -430,7 +443,7 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 			}
 			else if (call.brackets == Brackets.Round) {
 				for (const fn of fileData.completion.functions) {
-					if (fn.name == call.obj) {
+					if (fn.name == call.obj && fn.tdk.length > 0) {
 						call.tdks.add(fn.tdk)
 					}
 				}
@@ -441,7 +454,7 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 			}
 		}
 		// failed to resolve tdk
-		break
+		// break
 	}
 }
 
@@ -508,7 +521,6 @@ function findTokensUnderCursor(doc: TextDocument, fileData: FixedValidationResul
 			&& tok._range.start.line == tok._range.end.line
 			&& posInRange(position, tok._range)
 			&& tok._originalText == doc.getText(tok._range)
-			&& tok.tdk.length > 0
 		) {
 			res.push(tok)
 		}
@@ -682,7 +694,7 @@ connection.onHover(async (textDocumentPosition) => {
 		if (!first)
 			res += '\n'
 		first = false
-		res += describeToken(tok)
+		res += describeToken(tok, fileData.completion)
 		if (settings.hovers.verbose) {
 			//
 		}
@@ -776,7 +788,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const last = callChain[callChain.length - 1]
 	let res: Location[] = []
 
-	const resTdks = last.tokens.length > 0 ? last.tokens.map(it => it.tdk) : last.tdks
+	const resTdks = last.tdks
 	for (const resTdk of resTdks) {
 		for (const td of fileData.completion.typeDecls) {
 			if (td.tdk === resTdk) {
@@ -883,10 +895,11 @@ connection.onDefinition(async (declarationParams) => {
 		}
 
 		if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
-			for (const st of fileData.completion.structs) {
-				if (st.parentName === tok.name && st.parentMod === tok.mod) {
-					addValidLocation(res, st)
-				}
+			const st = fileData.completion.structs.find(st => st.name === tok.name && st.mod === tok.mod)
+			if (st) {
+				const parent = getParentStruct(st, fileData.completion)
+				if (parent)
+					addValidLocation(res, parent)
 			}
 		}
 
@@ -1461,7 +1474,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 		}
 		for (const s of res.completion.structs) {
-			s.column = Math.max(s.column - 5, 0) // magic number to fix column
+			// s.column = Math.max(s.column - 5, 0) // magic number to fix column
 			s._range = AtToRange(s)
 			s._uri = AtToUri(s, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
@@ -1621,7 +1634,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					label: token.name,
 					kind: CompletionItemKind.Variable,
 					detail: token.name,
-					documentation: describeToken(token),
+					documentation: describeToken(token, fixedResults.completion),
 				})
 			}
 		}
