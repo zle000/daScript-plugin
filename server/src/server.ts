@@ -47,6 +47,7 @@ function debugWsFolders() {
 
 documents.onDidChangeContent((event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
+	connection.languages.inlayHint.refresh()
 	forceUpdateDocumentData(event.document)
 })
 
@@ -1043,8 +1044,8 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	const doc = documents.get(inlayHintParams.textDocument.uri)
 	if (!doc)
 		return null
-	const fileData = await getDocumentData(inlayHintParams.textDocument.uri)
-	if (!fileData)
+	const fileData = validatingResults.get(inlayHintParams.textDocument.uri)
+	if (!fileData || fileData.errors.length > 0 || doc.version != fileData.fileVersion)
 		return null
 	const res: InlayHint[] = []
 	let idx = 0
@@ -1640,6 +1641,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 	}
 
 	validatingResults.set(uri, fixedResults)
+
+	connection.languages.inlayHint.refresh()
 }
 
 connection.listen()
