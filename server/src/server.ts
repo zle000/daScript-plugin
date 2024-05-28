@@ -13,7 +13,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs, addUniqueLocation } from './completion'
 import { shortTdk } from './completion'
 import { closedBracketPos } from './completion'
 
@@ -706,34 +706,27 @@ connection.onHover(async (textDocumentPosition) => {
 			res += `\n//^ ${tok.parentTdk}`
 		}
 
-		if (tok.kind == TokenKind.ExprCall /* || tok.kind == 'func' */) {
-			const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
-			if (func != null && func.cpp.length > 0)
-				res += `\n[::${func.cpp}(...)]`
-		}
-		else if (tok.kind != TokenKind.Func && tok.tdk.length > 0) {
-			const showBaseType = tok.kind != TokenKind.ExprAddr
+		const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
+		if (func != null && func.cpp.length > 0)
+			res += `\n[::${func.cpp}(...)]`
+
+		if (tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
 			for (const td of fileData.completion.typeDecls) {
 				if (td.tdk === tok.tdk) {
-					if (showBaseType && !primitiveBaseType(td, fileData.completion))
+					if (!primitiveBaseType(td, fileData.completion))
 						res += `\n${typeDeclDocs(td, fileData.completion)}`
-					const pos = typeDeclDefinition(td, fileData.completion)
-					if (pos._uri?.length > 0)
-						res += `\n//@@${pos._uri}`
-					if (!isRangeZeroEmpty(pos._range))
-						res += `\n//@@${JSON.stringify(pos._range)}`
 					break
 				}
 			}
 		}
 		if (settings.hovers.verbose) {
-			if (tok.declAt._uri?.length > 0)
+			if (tok.declAt._uri.length > 0)
 				res += `\n//@${tok.declAt._uri}`
 			if (!isRangeZeroEmpty(tok.declAt._range))
 				res += `\n//@${JSON.stringify(tok.declAt._range)}`
 		}
 		if (settings.experimental) {
-			if (tok._uri?.length > 0)
+			if (tok._uri.length > 0)
 				res += `\n//${tok._uri}`
 			res += `\n//${JSON.stringify(tok._range)}`
 		}
@@ -842,11 +835,11 @@ connection.onReferences(async (referencesParams) => {
 			continue
 		}
 
-		result.push(Location.create(declAt._uri, declAt._range))
+		addUniqueLocation(result, declAt)
 
 		for (const td of fileData.tokens) {
 			if (declAt._uri === td.declAt._uri && isRangeEqual(declAt._range, td.declAt._range)) {
-				result.push(Location.create(td._uri, td._range))
+				addUniqueLocation(result, td)
 			}
 		}
 	}
@@ -868,54 +861,8 @@ connection.onDefinition(async (declarationParams) => {
 	const last = callChain[callChain.length - 1]
 	for (const tok of last.tokens) {
 		addValidLocation(res, tok.declAt)
-
-		if (tok.kind == TokenKind.ExprAddr) {
-			// function call
-			const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
-			if (func)
-				addValidLocation(res, func.decl)
-		}
-		if (tok.kind == TokenKind.Typedecl) {
-			const td = fileData.completion.typeDecls.find(td => td.tdk === tok.tdk)
-			if (td != null) {
-				const pos = typeDeclDefinition(td, fileData.completion)
-				addValidLocation(res, pos)
-			}
-			if (tok.alias.length > 0) {
-				const td = fileData.completion.typeDefs.find(td => td.name === tok.alias && td.mod === tok.mod)
-				if (td != null) {
-					addValidLocation(res, td)
-				}
-			}
-		}
-
-		if (tok.kind == TokenKind.ExprGoto) {
-			// TODO: search label with same name
-			// name === goto label 0 -> label 0
-		}
-
-		if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
-			const st = fileData.completion.structs.find(st => st.name === tok.name && st.mod === tok.mod)
-			if (st) {
-				const parent = getParentStruct(st, fileData.completion)
-				if (parent)
-					addValidLocation(res, parent)
-			}
-		}
-
-		const parentTdks: Set<string> = tok.parentTdk.length > 0 ? new Set(tok.parentTdk) : callChain.length > 1 ? callChain[callChain.length - 2].tdks : new Set()
-		for (const parentTdk of parentTdks) {
-			for (const td of fileData.completion.typeDecls) {
-				if (td.tdk === parentTdk) {
-					// TODO: find pos for field tdk.name
-					const pos = typeDeclDefinition(td, fileData.completion)
-					addValidLocation(res, pos)
-					break
-				}
-			}
-		}
 	}
-	if (last.tokens.length === 0) {
+	if (last.tokens.length === 0 && last.delimiter != Delimiter.Pipe && last.delimiter != Delimiter.ColonColon) {
 		const prev = callChain.length > 1 ? callChain[callChain.length - 2] : null
 		if (prev) {
 			for (const tdk of prev.tdks) {
@@ -1636,6 +1583,82 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					detail: token.name,
 					documentation: describeToken(token, fixedResults.completion),
 				})
+			}
+
+			if (isRangeZeroEmpty(token.declAt._range)) {
+				if (token.kind == TokenKind.ExprAddr) {
+					// function call
+					const func = fixedResults.completion.functions.find(f => f.name === token.name && f.mod === token.mod)
+					if (func)
+						token.declAt = func
+				}
+				else if (token.kind == TokenKind.Typedecl) {
+					const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+					if (td != null) {
+						token.declAt = typeDeclDefinition(td, fixedResults.completion)
+					}
+					if (isRangeZeroEmpty(token.declAt._range) && token.alias.length > 0) {
+						const td = fixedResults.completion.typeDefs.find(td => td.name === token.alias && td.mod === token.mod)
+						if (td != null)
+							token.declAt = td
+					}
+				}
+				else if (token.kind == TokenKind.Struct || token.kind == TokenKind.Handle) {
+					const st = fixedResults.completion.structs.find(st => st.name === token.name && st.mod === token.mod)
+					if (st) {
+						token.declAt = st
+					}
+				}
+				else if (token.kind == TokenKind.ExprConstEnumeration) {
+					const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+					if (td && td.enumName.length > 0) {
+						const en = fixedResults.completion.enums.find(en => en.name === td.enumName && en.mod === td.mod)
+						if (en) {
+							for (const ev of en.values) {
+								const reqName = `${en.name} ${ev.name}`
+								if (token.name == reqName) {
+									token.declAt = ev
+									break
+								}
+							}
+							if (isRangeZeroEmpty(token.declAt._range))
+								token.declAt = en
+						}
+					}
+				}
+				// else if (tok.kind == TokenKind.ExprGoto) {
+				// TODO: search label with same name
+				// name === goto label 0 -> label 0
+				// }
+
+			}
+			// if (isRangeZeroEmpty(token.declAt._range) && token.kind != TokenKind.Func && token.kind != TokenKind.ExprDebug) {
+			// 	if (token.tdk.length > 0) {
+			// 		const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+			// 		token.declAt = td
+			// 	}
+			// }
+			if (isRangeZeroEmpty(token.declAt._range) && token.parentTdk.length > 0) {
+				const parentTypeDecl = fixedResults.completion.typeDecls.find(td => td.tdk === token.parentTdk)
+				if (parentTypeDecl) {
+					typeDeclIter(parentTypeDecl, fixedResults.completion, (td, st, en, tf) => {
+						if (st) {
+							const field = st.fields.find(f => f.name === token.name)
+							if (field) {
+								token.declAt = field._property ? (field._writeFn.decl ?? field._readFn.decl) : field
+							}
+						}
+						if (en) {
+							const value = en.values.find(v => v.name === token.name)
+							if (value) {
+								token.declAt = value
+							}
+						}
+					})
+
+				}
+				if (isRangeZeroEmpty(token.declAt._range))
+					token.declAt = typeDeclDefinition(parentTypeDecl, fixedResults.completion)
 			}
 		}
 

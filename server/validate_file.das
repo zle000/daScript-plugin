@@ -292,14 +292,23 @@ class AstData : AstVisitor
         res.tokens |> emplace(token)
         return length(res.tokens) - 1
 
+    ignoreNextTypeDecl : bool
+
     def override preVisitTypeDecl(typ : TypeDeclPtr) : void
+        if ignoreNextTypeDecl
+            return
         preVisitTypeDecl_(typ)
 
     [unused_argument(name)] def override preVisitAlias(typ : TypeDeclPtr; name : das_string) : void
+        ignoreNextTypeDecl = true
         let idx = preVisitTypeDecl_(typ)
         if idx >= 0
             // res.tokens[idx].name = "{name}"
             res.tokens[idx].alias = "{name}"
+
+    [unused_argument(name)] def override visitAlias(var typ:TypeDeclPtr;name:das_string) : TypeDeclPtr
+        ignoreNextTypeDecl = false
+        return <- typ
 
 
     def override preVisitExpression(expr : ExpressionPtr) : void

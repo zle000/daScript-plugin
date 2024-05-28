@@ -97,6 +97,8 @@ export enum TokenKind {
     BlockArg = 'block_arg',
     ExprFor = 'ExprFor',
     ExprAssume = 'ExprAssume',
+    ExprDebug = 'ExprDebug',
+    ExprConstEnumeration = 'ExprConstEnumeration',
 }
 
 export function isValidIdChar(ch: string) {
@@ -189,6 +191,14 @@ export function isValidLocation(at: CompletionAt): boolean {
 export function addValidLocation(res: Location[], at: CompletionAt): void {
     if (at != null && isValidLocation(at))
         res.push(Location.create(at._uri, at._range))
+}
+
+export function addUniqueLocation(res: Location[], at: CompletionAt): void {
+    if (at != null && isValidLocation(at)) {
+        const loc = Location.create(at._uri, at._range)
+        if (!res.some(l => l.uri === loc.uri && isRangeOverlap(l.range, loc.range)))
+            res.push(loc)
+    }
 }
 
 export interface CompletionEnumValue extends CompletionAt {
@@ -871,6 +881,10 @@ export function isRangeLess(a: Range, b: Range) {
 
 export function isRangeEqual(a: Range, b: Range) {
     return isPositionEqual(a.start, b.start) && isPositionEqual(a.end, b.end)
+}
+
+function isRangeOverlap(a: Range, b: Range) {
+    return isPositionLessOrEqual(a.start, b.end) && isPositionLessOrEqual(b.start, a.end)
 }
 
 // completely empty range
