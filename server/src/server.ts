@@ -47,7 +47,7 @@ function debugWsFolders() {
 
 documents.onDidChangeContent((event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
-	updateDocumentData(event.document)
+	forceUpdateDocumentData(event.document)
 })
 
 documents.onDidClose(e => {
@@ -203,11 +203,11 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 	}
 	else {
 		// skip spaces
-		for (; i >= 0; i--) {
-			const ch = line[i]
-			if (!isSpaceChar(ch))
-				break
-		}
+		// for (; i >= 0; i--) {
+		// 	const ch = line[i]
+		// 	if (!isSpaceChar(ch))
+		// 		break
+		// }
 	}
 	const keyData: CallChain = { obj: key, objRange: keyRange, tokens: tokens, tdks: new Set(tokens.map(it => it.tdk)), delimiter: del, brackets: Brackets.None, delimiterRange: Range.create(0, 0, 0, 0) }
 
@@ -1120,7 +1120,7 @@ connection.onDidChangeConfiguration(change => {
 
 	// Revalidate all open text documents
 	// TODO: queue validation
-	documents.all().forEach(updateDocumentData)
+	documents.all().forEach(forceUpdateDocumentData)
 })
 
 function getDocumentSettings(resource: string): Thenable<DasSettings> {
@@ -1175,9 +1175,9 @@ async function getDocumentDataRaw(uri: string, doc: TextDocument): Promise<Fixed
 	})
 }
 
-function updateDocumentData(doc: TextDocument) {
+function forceUpdateDocumentData(doc: TextDocument) {
 	getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
-		validateTextDocument(doc)
+		validateTextDocument(doc, { force: true })
 	})
 }
 
@@ -1194,28 +1194,42 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
-async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat: boolean } = { autoFormat: false }): Promise<void> {
-	const extraAction = extra.autoFormat
-	if (!extraAction) {
+async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
+	if (!(extra.autoFormat || extra.force)) {
 		const prevProcess = validatingProcesses.get(textDocument.uri)
-		console.log('prevProcess version', prevProcess?.version ?? -1)
-		if (prevProcess != null) {
+		if (prevProcess) {
 			if (prevProcess.version === textDocument.version) {
-				console.log('document version not changed, ignoring', textDocument.uri)
 				return prevProcess.promise
 			}
 			prevProcess.process?.kill()
 			validatingProcesses.delete(textDocument.uri)
-			console.log('killed process for', textDocument.uri)
+			console.log('killed process for', textDocument.uri, 'prev version', prevProcess.version, 'new version', textDocument.version)
 		}
 		const validResult = validatingResults.get(textDocument.uri)
-		// console.log('validResult', validResult)
 		if (validResult?.fileVersion === textDocument.version) {
 			console.log('document version not changed, ignoring', textDocument.uri)
 			return Promise.resolve()
 		}
 	}
+
+	const vp: ValidatingProcess = { process: null, version: textDocument.version, promise: null }
+	var thisResolve: () => void
+	var thisReject: (any) => void
+	vp.promise = new Promise<void>((resolve, reject) => {
+		thisResolve = resolve
+		thisReject = reject
+	})
+	if (!extra.autoFormat)
+		validatingProcesses.set(textDocument.uri, vp)
+
 	const settings = await getDocumentSettings(textDocument.uri)
+
+	if (!extra.autoFormat) {
+		var prevProcess = validatingProcesses.get(textDocument.uri)
+		if (prevProcess == null || prevProcess.version !== textDocument.version) {
+			return // version was changed while we were waiting for settings
+		}
+	}
 
 	const filePath = URI.parse(textDocument.uri).fsPath
 	const tempFilePrefix = `${stringHashCode(textDocument.uri).toString(16)}_${validateId.toString(16)}_${textDocument.version.toString(16)}`
@@ -1261,107 +1275,106 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 	console.log(`> validating ${textDocument.uri} version ${textDocument.version}`)
 	console.log('> cwd', cwd)
 	console.log('> exec', settings.compiler, args.join(' '))
-	const vp: ValidatingProcess = { process: null, version: textDocument.version, promise: null }
-	if (!extraAction)
-		validatingProcesses.set(textDocument.uri, vp)
 	const child = spawn(settings.compiler, args, { cwd: cwd })
 	vp.process = child
 
-	vp.promise = new Promise<void>((resolve, reject) => {
-
-		const diagnostics: Map<string, Diagnostic[]> = new Map()
-		diagnostics.set(textDocument.uri, [])
-		let output = ''
-		child.stdout.on('data', (data: any) => {
-			output += data
-		})
-		child.stderr.on('data', (data: any) => {
-			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `${data}` })
-		})
-		child.on('error', (error: any) => {
-			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `${error}` })
-			reject(error)
-		})
-		child.on('close', (exitCode: any) => {
-			const validateTextResult = fs.readFileSync(resultFilePath, 'utf8')
-			// console.log('remove temp files', tempFilePath, resultFilePath)
+	const diagnostics: Map<string, Diagnostic[]> = new Map()
+	diagnostics.set(textDocument.uri, [])
+	let output = ''
+	child.stdout.on('data', (data: any) => {
+		output += data
+	})
+	child.stderr.on('data', (data: any) => {
+		diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `${data}` })
+	})
+	child.on('error', (error: any) => {
+		diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `${error}` })
+		thisReject(error)
+	})
+	child.on('close', (exitCode: any) => {
+		const validateTextResult = fs.readFileSync(resultFilePath, 'utf8')
+		// console.log('remove temp files', tempFilePath, resultFilePath)
+		try {
 			fs.rmSync(tempFilePath)
 			fs.rmSync(resultFilePath)
+		}
+		catch (e) {
+			console.log('failed to remove temp files', e)
+		}
 
-			if (exitCode === null) {
-				console.log('Validation process exited with code', exitCode)
-				resolve()
-				return
-			}
+		if (exitCode === null) {
+			console.log('Validation process exited with code', exitCode)
+			thisResolve()
+			return
+		}
 
-			if (extra.autoFormat) {
-				autoFormatResult.set(textDocument.uri, validateTextResult)
-				resolve()
-				return
-			}
+		if (extra.autoFormat) {
+			autoFormatResult.set(textDocument.uri, validateTextResult)
+			thisResolve()
+			return
+		}
 
-			if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
-				console.log('document version changed, ignoring result', textDocument.uri)
-				resolve()
-				return
-			}
+		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
+			console.log('document version changed, ignoring result', textDocument.uri)
+			thisResolve()
+			return
+		}
 
-			// console.log(validateTextResult)
-			let result: ValidationResult = null
-			try {
-				if (validateTextResult.length > 0)
-					result = JSON.parse(validateTextResult) as ValidationResult
-			}
-			catch (e) {
-				console.log('failed to parse result', e)
-				console.log('"""', validateTextResult, '"""')
-			}
-			// console.log(result) // TODO: remove this log
-			if (result != null) {
-				for (const error of result.errors) {
-					error._range = AtToRange(error)
-					error._uri = AtToUri(error, textDocument.uri, settings, result.dasRoot)
-					if (error._uri.length === 0)
-						error._uri = textDocument.uri
+		// console.log(validateTextResult)
+		let result: ValidationResult = null
+		try {
+			if (validateTextResult.length > 0)
+				result = JSON.parse(validateTextResult) as ValidationResult
+		}
+		catch (e) {
+			console.log('failed to parse result', e)
+			console.log('"""', validateTextResult, '"""')
+		}
+		// console.log(result) // TODO: remove this log
+		if (result != null) {
+			for (const error of result.errors) {
+				error._range = AtToRange(error)
+				error._uri = AtToUri(error, textDocument.uri, settings, result.dasRoot)
+				if (error._uri.length === 0)
+					error._uri = textDocument.uri
 
-					let msg = error.what.trim()
-					if (error.extra?.length > 0 || error.fixme?.length > 0) {
-						var suffix = ''
-						if (error.extra?.length > 0)
-							suffix += error.extra.trim()
-						if (error.fixme?.length > 0)
-							suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
+				let msg = error.what.trim()
+				if (error.extra?.length > 0 || error.fixme?.length > 0) {
+					var suffix = ''
+					if (error.extra?.length > 0)
+						suffix += error.extra.trim()
+					if (error.fixme?.length > 0)
+						suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
 
-						msg = `${msg}\n\n${suffix}`
-					}
-					const diag: Diagnostic = {
-						range: error._range,
-						message: msg,
-						code: error.cerr,
-						severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
-					}
-					if (!diagnostics.has(error._uri))
-						diagnostics.set(error._uri, [])
-					diagnostics.get(error._uri).push(diag)
+					msg = `${msg}\n\n${suffix}`
 				}
-				console.time('storeValidationResult')
-				storeValidationResult(settings, textDocument, result)
-				console.timeEnd('storeValidationResult')
-			} else { // result == null
-				if (!diagnostics.has(textDocument.uri))
-					diagnostics.set(textDocument.uri, [])
-				diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}.` })
+				const diag: Diagnostic = {
+					range: error._range,
+					message: msg,
+					code: error.cerr,
+					severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+				}
+				if (!diagnostics.has(error._uri))
+					diagnostics.set(error._uri, [])
+				diagnostics.get(error._uri).push(diag)
 			}
-			if (exitCode !== 0 || result == null) {
-				console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
-				console.log('"""', output, '"""')
-			}
-			for (const [uri, diags] of diagnostics.entries()) {
-				connection.sendDiagnostics({ uri: uri, diagnostics: diags })
-			}
-			validatingProcesses.delete(textDocument.uri)
-			resolve()
-		})
+			console.time('storeValidationResult')
+			storeValidationResult(settings, textDocument, result)
+			console.timeEnd('storeValidationResult')
+		} else { // result == null
+			if (!diagnostics.has(textDocument.uri))
+				diagnostics.set(textDocument.uri, [])
+			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}.` })
+		}
+		if (exitCode !== 0 || result == null) {
+			console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
+			console.log('"""', output, '"""')
+		}
+		for (const [uri, diags] of diagnostics.entries()) {
+			connection.sendDiagnostics({ uri: uri, diagnostics: diags })
+		}
+		validatingProcesses.delete(textDocument.uri)
+		thisResolve()
 	})
 	return vp.promise
 }
@@ -1371,7 +1384,7 @@ function addCompletionItem(map: Array<Map<string, CompletionItem>>, item: Comple
 		map.push(new Map())
 	const items = map[item.kind]
 	const it = items.get(item.label)
-	if (it != null && it.detail == item.detail) {
+	if (it != null) {
 		it.documentation += '\n' + item.documentation
 		return
 	}

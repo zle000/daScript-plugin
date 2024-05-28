@@ -515,8 +515,9 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
         return td
     }
     let resultTd = td
-    const dotDel = delimiter == Delimiter.Dot
+    const dotDel = delimiter == Delimiter.Dot || delimiter == Delimiter.None
     const qDotDel = delimiter == Delimiter.QuestionDot
+    const spaceDel = delimiter == Delimiter.Space
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0 && brackets != Brackets.Square && brackets != Brackets.QuestionSquare) {
         const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
         if (st) {
@@ -542,18 +543,21 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
             console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
     }
     // enum with zero name == unspecified enumeration const
-    if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0 && brackets != Brackets.Square && brackets != Brackets.QuestionSquare) {
+    if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0 && (dotDel || spaceDel) && brackets != Brackets.Square && brackets != Brackets.QuestionSquare) {
         const en = cr.enums.find(e => e.name === td.enumName && e.mod === td.mod)
         if (en) {
-            en.values.forEach(v => {
+            for (const v of en.values) {
                 const c = CompletionItem.create(v.name)
                 c.kind = CompletionItemKind.EnumMember
                 c.detail = enumValueDetail(v)
                 c.documentation = enumValueDocs(v, en)
                 c.data = en.tdk
+                if (dotDel) {
+                    c.insertText = ` == ${en.name} ${v.name}`
+                }
                 c.sortText = FIELD_SORT
                 res.push(c)
-            })
+            }
         }
         else
             console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
@@ -662,7 +666,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
     } else {
         const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
         const propertyPrefixes = propPrefix.length > 0 ? propPrefix :
-            (delimiter == Delimiter.Dot || delimiter == Delimiter.None) ? PROPERTY_PREFIXES : []
+            (dotDel) ? PROPERTY_PREFIXES : []
         for (const propertyPrefix of propertyPrefixes) {
             for (const fn of cr.functions) {
                 if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
