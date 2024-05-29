@@ -106,7 +106,7 @@ export function isValidIdChar(ch: string) {
 }
 
 export function isSpaceChar(ch: string) {
-    return ch === ' ' || ch === '\t'
+    return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
 }
 
 function modPrefix(mod: string) {
@@ -520,6 +520,11 @@ export const METHOD_SORT = '2'
 export const EXTENSION_FN_SORT = '3'
 export const OPERATOR_SORT = '4'
 
+function addUniqueCompletionItem(res: CompletionItem[], c: CompletionItem) {
+    if (!res.some(ci => ci.label === c.label))
+        res.push(c)
+}
+
 // returns actual CompletionTypeDecl
 export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
     return typeDeclCompletion_(td, cr, delimiter, brackets, 0, res)
@@ -551,7 +556,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
                     c.documentation = structFieldDocs(f, st)
                     c.data = f.tdk
                     c.sortText = isFunction ? METHOD_SORT : f._property ? PROPERTY_SORT : FIELD_SORT
-                    res.push(c)
+                    addUniqueCompletionItem(res, c)
                 })
         }
         else
@@ -571,7 +576,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
                     c.insertText = ` == ${en.name} ${v.name}`
                 }
                 c.sortText = FIELD_SORT
-                res.push(c)
+                addUniqueCompletionItem(res, c)
             }
         }
         else
@@ -629,7 +634,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
             c.documentation = typeDeclFieldDocs(f, td)
             c.data = f.tdk
             c.sortText = FIELD_SORT
-            res.push(c)
+            addUniqueCompletionItem(res, c)
         })
         if (td.baseType == BaseType.tFloat2 || td.baseType == BaseType.tFloat3 || td.baseType == BaseType.tFloat4
             || td.baseType == BaseType.tInt2 || td.baseType == BaseType.tInt3 || td.baseType == BaseType.tInt4 || td.baseType == BaseType.tRange
@@ -645,7 +650,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
                     c.detail = `${c.label} : ${type}`
                     c.data = type
                     c.sortText = FIELD_SORT
-                    res.push(c)
+                    addUniqueCompletionItem(res, c)
                 }
             }
             // const td2 = cr.typeDecls.find(t => t.tdk === type)
@@ -693,7 +698,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
                     c.data = fn.tdk
                     c.sortText = PROPERTY_SORT
                     c.insertText = c.label
-                    res.push(c)
+                    addUniqueCompletionItem(res, c)
                 }
             }
         }
@@ -814,9 +819,10 @@ export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSett
 }
 
 function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string) {
-    if (fs.existsSync(at.file)) {
-        return URI.file(at.file).toString()
-    }
+    // DON'T DO THIS
+    // if (fs.existsSync(at.file)) {
+    //     return URI.file(at.file).toString()
+    // }
 
     for (const dir of settings.project.roots) {
         const full = path.join(dir, at.file)
@@ -926,7 +932,7 @@ export function shortTdk(tdk: string): string {
 }
 
 export function closedBracketPos(doc: TextDocument, pos: Position): Position {
-    let line = doc.getText(Range.create(pos.line, pos.character, pos.line, pos.character + 500))
+    let line = doc.getText(Range.create(pos.line, pos.character, pos.line + 50, pos.character + 500))
     let num = 0
     // skip spaces
     let i = 0
@@ -946,7 +952,7 @@ export function closedBracketPos(doc: TextDocument, pos: Position): Position {
         else if (ch == ')')
             num--
         if (num == 0)
-            return Position.create(pos.line, pos.character + i + 1)
+            return doc.positionAt(doc.offsetAt(pos) + i + 1)
     }
     return pos
 }

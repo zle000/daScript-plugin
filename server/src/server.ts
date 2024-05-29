@@ -996,8 +996,9 @@ connection.onDocumentFormatting(async (formatParams) => {
 	autoFormatResult.delete(globalCompletionFile.uri)
 	if (newText == null)
 		return null
+	const fixedText = newText.replace(/\r\n/g, '\n')
 	const allTextRange = Range.create(Position.create(0, 0), doc.positionAt(doc.getText().length))
-	return [{ newText: newText, range: allTextRange }]
+	return [{ newText: fixedText, range: allTextRange }]
 })
 
 connection.languages.inlayHint.on(async (inlayHintParams) => {
@@ -1156,7 +1157,8 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 }
 
 async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
-	if (!(extra.autoFormat || extra.force)) {
+	const registerValidatingResult = !extra.autoFormat
+	if (registerValidatingResult) {
 		const prevProcess = validatingProcesses.get(textDocument.uri)
 		if (prevProcess) {
 			if (prevProcess.version === textDocument.version) {
@@ -1180,15 +1182,21 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 		thisResolve = resolve
 		thisReject = reject
 	})
-	if (!extra.autoFormat)
+	if (registerValidatingResult)
 		validatingProcesses.set(textDocument.uri, vp)
 
 	const settings = await getDocumentSettings(textDocument.uri)
 
-	if (!extra.autoFormat) {
+	if (registerValidatingResult) {
 		var prevProcess = validatingProcesses.get(textDocument.uri)
-		if (prevProcess == null || prevProcess.version !== textDocument.version) {
-			return // version was changed while we were waiting for settings
+		if (prevProcess != null && prevProcess.version > textDocument.version) {
+			// version was changed while we were waiting for settings
+			return prevProcess.promise
+		}
+		const validResult = validatingResults.get(textDocument.uri)
+		if (validResult != null && validResult.fileVersion > textDocument.version) {
+			// version was changed while we were waiting for settings
+			return Promise.resolve()
 		}
 	}
 
