@@ -306,7 +306,7 @@ class AstData : AstVisitor
             // res.tokens[idx].name = "{name}"
             res.tokens[idx].alias = "{name}"
 
-    [unused_argument(name)] def override visitAlias(var typ:TypeDeclPtr;name:das_string) : TypeDeclPtr
+    [unused_argument(name)] def override visitAlias(var typ : TypeDeclPtr; name : das_string) : TypeDeclPtr
         ignoreNextTypeDecl = false
         return <- typ
 
