@@ -332,9 +332,18 @@ struct CompletionFunction : CompletionAt
     args : array<CompletionFuncArg>
     gen : bool
     isClassMethod : bool
+    isGeneric : bool
 
-def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : string)
+[nodiscard]
+def fix_fn_name(name : string): string
+    if name |> starts_with("__::")
+        return name |> slice(4)
+    return name
+
+def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : string; is_generic : bool)
     var fn <- [[CompletionFunction() name="{f.name}", cpp="{cpp}"]]
+    fn.name = fix_fn_name(fn.name)
+    fn.isGeneric = is_generic
     fn |> fill_at(f.at)
     if f._module != null
         fn.mod = f._module.name |> string()
@@ -409,11 +418,11 @@ def parse_module(var res : CompletionContext; mod : rtti::Module?)
 
     mod |> for_each_generic() <| $(f)
         // debug(f)
-        res |> parse_function(f, funcCppNames?[string(f.name)] ?? "")
+        res |> parse_function(f, funcCppNames?[string(f.name)] ?? "", true)
 
     mod |> for_each_function("") <| $(f)
         // debug(f)
-        res |> parse_function(f, funcCppNames?[string(f.name)] ?? "")
+        res |> parse_function(f, funcCppNames?[string(f.name)] ?? "", false)
 
     mod |> module_for_each_annotation() <| $(a)
         res |> parse_annotation(a)

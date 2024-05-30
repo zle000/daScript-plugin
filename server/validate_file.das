@@ -42,7 +42,7 @@ struct ValidateConfig
     fileAccessRoots : table<string; string>
 
 let WRITE_RESULT = true
-let WRITE_RESULT_TO_FILE = false
+let WRITE_RESULT_TO_FILE = true
 
 [export]
 def main()
@@ -362,8 +362,8 @@ class AstData : AstVisitor
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
         var token <- DasToken(expr, completion)
-        token.name = "{expr.name}"
-        token.value = "def {expr.name}("
+        token.name = "{expr.name}" |> fix_fn_name()
+        token.value = "def {token.name}("
         if expr.func != null
             token.mod = expr.func._module != null ? "{expr.func._module.name}" : ""
             token.declAt |> fill_at(expr.func.at)
@@ -478,7 +478,7 @@ class AstData : AstVisitor
         var token <- DasToken()
         token.kind = "func"
         token |> fill_at(fun.at)
-        token.name = "{fun.name}"
+        token.name = "{fun.name}" |> fix_fn_name()
         if fun.result != null
             let tdk = TypeDeclKey(fun.result)
             token.tdk = tdk
@@ -488,7 +488,7 @@ class AstData : AstVisitor
         token.mod = fun._module != null ? "{fun._module.name}" : ""
         funcModule = token.mod
         token.declAt |> fill_at(fun.atDecl)
-        token.value = "def {fun.name}("
+        token.value = "def {token.name}("
         var first = true
         for a in fun.arguments
             token.value += first ? "" : ", "

@@ -695,40 +695,48 @@ connection.onHover(async (textDocumentPosition) => {
 			res += '\n'
 		first = false
 		res += describeToken(tok, fileData.completion)
-		if (settings.hovers.verbose) {
-			//
-		}
-		if (settings.experimental) {
-			res += `\n// ${tok.kind}`
-		}
-
-		if (tok.kind == TokenKind.Field) {
-			res += `\n//^ ${tok.parentTdk}`
-		}
 
 		const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
 		if (func != null && func.cpp.length > 0)
 			res += `\n[::${func.cpp}(...)]`
 
-		if (tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
-			for (const td of fileData.completion.typeDecls) {
-				if (td.tdk === tok.tdk) {
-					if (!primitiveBaseType(td, fileData.completion))
-						res += `\n${typeDeclDocs(td, fileData.completion)}`
-					break
+		if (settings.hovers.verbose) {
+
+			if (tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
+				for (const td of fileData.completion.typeDecls) {
+					if (td.tdk === tok.tdk) {
+						if (!primitiveBaseType(td, fileData.completion)) {
+							const doc = typeDeclDocs(td, fileData.completion)
+							if (doc.length > 0)
+								res += `\n\n${doc}`
+						}
+						break
+					}
 				}
 			}
+
+			// if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.ExprAddr) {
+			// 	for (const fn of fileData.completion.functions) {
+			// 		if (fn.name === tok.name && fn.mod === tok.mod) {
+			// 			res += `\n\n${funcDocs(fn)}`
+			// 			break
+			// 		}
+			// 	}
+			// }
 		}
-		if (settings.hovers.verbose) {
+		if (settings.experimental) {
+			res += `\n// ${tok.kind}`
+			if (tok.parentTdk.length > 0)
+				res += `\n//^ ${tok.parentTdk}`
+
+			if (tok._uri.length > 0)
+				res += `\n//${tok._uri}`
+			res += `\n//${JSON.stringify(tok._range)}`
+
 			if (tok.declAt._uri.length > 0)
 				res += `\n//@${tok.declAt._uri}`
 			if (!isRangeZeroEmpty(tok.declAt._range))
 				res += `\n//@${JSON.stringify(tok.declAt._range)}`
-		}
-		if (settings.experimental) {
-			if (tok._uri.length > 0)
-				res += `\n//${tok._uri}`
-			res += `\n//${JSON.stringify(tok._range)}`
 		}
 
 	}
@@ -1354,7 +1362,7 @@ function addCompletionItem(map: Array<Map<string, CompletionItem>>, item: Comple
 	const items = map[item.kind]
 	const it = items.get(item.label)
 	if (it != null) {
-		it.documentation += '\n' + item.documentation
+		it.documentation += '\n\n' + item.documentation
 		return
 	}
 	items.set(item.label, item)

@@ -459,7 +459,7 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (
     if (td.alias.length > 0) {
         const td1 = cr.typeDefs.find(t => t.name === td.alias && t.mod === td.mod)
         if (td1)
-            return cb(td, null, null, td1)
+            cb(td, null, null, td1)
         // else
         //     console.error(`typeDeclDocs: failed to find type ${td.alias} in ${td.mod}`)
     }
@@ -493,13 +493,13 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cb: (
 // TODO: print dim size
 export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult): string {
     let res = ''
-    typeDeclIter(td, cr, function (td, st, en, tf) {
+    typeDeclIter(td, cr, function (td2, st, en, tf) {
         if (st)
-            res += structDocs(st)
+            res += `${res.length > 0 ? '\n\n' : ''}${structDocs(st)}`
         if (en)
-            res += enumDocs(en)
+            res += `${res.length > 0 ? '\n\n' : ''}${enumDocs(en)}`
         if (tf)
-            res += typedefDocs(tf)
+            res += `${res.length > 0 ? '\n\n' : ''}${typedefDocs(tf)}`
     })
 
     if (res.length == 0) {
@@ -770,6 +770,7 @@ export interface CompletionFunction extends CompletionAt {
     args: CompletionFuncArg[]
     gen: boolean
     isClassMethod: boolean
+    isGeneric: boolean
 }
 
 function funcRetTypeSuffix(retType: string) {
