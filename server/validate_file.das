@@ -372,10 +372,14 @@ class AstData : AstVisitor
                 token.value += first ? "" : ", "
                 first = false
                 token.value += "{a.name}"
+                if a._aka != ""
+                    token.value += " aka {a._aka}"
                 if a._type != null
                     let atdk = TypeDeclKey(a._type)
                     token.value += ": {atdk}"
                     *completion |> parse_typedecl(atdk, a._type)
+                if a.init != null
+                    token.value += " = {a.init |> describe()}"
             token.value += ")"
             if expr.func.result != null
                 let restdk = TypeDeclKey(expr.func.result)
@@ -490,10 +494,14 @@ class AstData : AstVisitor
             token.value += first ? "" : ", "
             first = false
             token.value += "{a.name}"
+            if a._aka != ""
+                token.value += " aka {a._aka}"
             if a._type != null
                 let atdk = TypeDeclKey(a._type)
                 token.value += ": {atdk}"
                 *completion |> parse_typedecl(atdk, a._type)
+            if a.init != null
+                token.value += " = {a.init |> describe()}"
         token.value += ")"
         if fun.result != null
             let restdk = TypeDeclKey(fun.result)
