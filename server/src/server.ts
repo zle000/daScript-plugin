@@ -715,14 +715,14 @@ connection.onHover(async (textDocumentPosition) => {
 				}
 			}
 
-			// if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.ExprAddr) {
-			// 	for (const fn of fileData.completion.functions) {
-			// 		if (fn.name === tok.name && fn.mod === tok.mod) {
-			// 			res += `\n\n${funcDocs(fn)}`
-			// 			break
-			// 		}
-			// 	}
-			// }
+			if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.ExprAddr) {
+				for (const fn of fileData.completion.functions) {
+					if (fn.name === tok.name && fn.mod === tok.mod) {
+						res += `\n\n${funcDocs(fn)}`
+						break
+					}
+				}
+			}
 		}
 		if (settings.experimental) {
 			res += `\n// ${tok.kind}`
@@ -730,8 +730,8 @@ connection.onHover(async (textDocumentPosition) => {
 				res += `\n//^ ${tok.parentTdk}`
 
 			if (tok._uri.length > 0)
-				res += `\n//${tok._uri}`
-			res += `\n//${JSON.stringify(tok._range)}`
+				res += `\n// ${tok._uri}`
+			res += `\n// ${JSON.stringify(tok._range)}`
 
 			if (tok.declAt._uri.length > 0)
 				res += `\n//@${tok.declAt._uri}`
