@@ -1337,7 +1337,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 				diagnostics.get(error._uri).push(diag)
 			}
 			console.time('storeValidationResult')
-			storeValidationResult(settings, textDocument, result)
+			storeValidationResult(settings, textDocument, result, diagnostics)
 			console.timeEnd('storeValidationResult')
 		} else { // result == null
 			if (!diagnostics.has(textDocument.uri))
@@ -1376,7 +1376,7 @@ function baseTypeToCompletionItemKind(baseType: string) {
 	return CompletionItemKind.Struct
 }
 
-function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult) {
+function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]>) {
 	const uri = doc.uri
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
@@ -1404,6 +1404,11 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 		}
 		const modules = new Set<string>()
+		var usedModules: Set<string> = new Set()
+		function addUsedModule(mod: string) {
+			if (mod.length > 0)
+				usedModules.add(mod)
+		}
 		const map = new Array<Map<string, CompletionItem>>()
 		function addMod(name: string, at: CompletionAt) {
 			if (name?.length > 0 && !modules.has(name)) {
@@ -1414,6 +1419,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					detail: `module ${name}`,
 					documentation: `module ${name}\n${at.file}`,
 				})
+				if (at._uri == uri)
+					addUsedModule(name)
 			}
 		}
 		for (const e of res.completion.enums) {
@@ -1478,6 +1485,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					documentation: typeDeclFieldDocs(tf, t),
 				})
 			}
+			if (t._uri == uri)
+				addUsedModule(t.mod)
 		}
 		for (const t of res.completion.typeDefs) {
 			t._range = AtToRange(t)
@@ -1559,6 +1568,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				documentation: funcDocs(f),
 			})
 			addMod(f.mod, f)
+			if (f._uri == uri)
+				addUsedModule(f.origMod)
 			for (const arg of f.args) {
 				arg._range = AtToRange(arg)
 				arg._uri = AtToUri(arg, uri, settings, res.dasRoot, fixedResults.filesCache)
@@ -1574,48 +1585,11 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		const tokens = fixedResults.tokens
 		fixedResults.tokens = []
 
-		for (const mod of fixedResults.requirements) {
-			mod._uri = uri
-			mod._range = AtToRange(mod)
-			if (mod.req.length > 0)
-				mod._range.start.character -= "require ".length
-			const fileName = AtToUri(mod, uri, settings, res.dasRoot, fixedResults.filesCache)
-			const declAt: CompletionAt = {
-				_range: Range.create(0, 0, 0, 1),
-				_uri: fileName,
-				file: '',
-				line: 0,
-				column: 0,
-				lineEnd: 0,
-				columnEnd: 0,
-				_originalText: '',
-			}
-			fixedResults.tokens.push({
-				kind: TokenKind.Require,
-				name: mod.req,
-				mod: mod.mod,
-				_range: mod._range,
-				_uri: mod._uri,
-				_originalText: doc.getText(mod._range),
-				declAt: declAt,
-				alias: '',
-				value: '',
-				tdk: '',
-				parentTdk: '',
-				isUnused: false,
-				isConst: false,
-				file: mod.file,
-				line: mod.line,
-				column: mod.column,
-				lineEnd: mod.lineEnd,
-				columnEnd: mod.columnEnd,
-			})
-		}
-
 		for (const token of tokens) {
 			token._uri = AtToUri(token, uri, settings, res.dasRoot, fixedResults.filesCache)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
+			addUsedModule(token.mod)
 			if (token.kind == TokenKind.ExprField)
 				token.columnEnd += token.name.length
 			token._range = AtToRange(token)
@@ -1644,23 +1618,32 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				if (token.kind == TokenKind.ExprAddr) {
 					// function call
 					const func = fixedResults.completion.functions.find(f => f.name === token.name && f.mod === token.mod)
-					if (func)
+					if (func) {
 						token.declAt = func
+						addUsedModule(token.mod)
+					}
 				}
 				else if (token.kind == TokenKind.Typedecl) {
 					const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
 					if (td != null) {
-						token.declAt = typeDeclDefinition(td, fixedResults.completion)
+						addUsedModule(td.mod)
+						const td2 = typeDeclDefinition(td, fixedResults.completion)
+						if (td2 != null) {
+							token.declAt = td2
+						}
 					}
 					if (isRangeZeroEmpty(token.declAt._range) && token.alias.length > 0) {
 						const td = fixedResults.completion.typeDefs.find(td => td.name === token.alias && td.mod === token.mod)
-						if (td != null)
+						if (td != null) {
+							addUsedModule(td.mod)
 							token.declAt = td
+						}
 					}
 				}
 				else if (token.kind == TokenKind.Struct || token.kind == TokenKind.Handle) {
 					const st = fixedResults.completion.structs.find(st => st.name === token.name && st.mod === token.mod)
 					if (st) {
+						addUsedModule(st.mod)
 						token.declAt = st
 					}
 				}
@@ -1669,6 +1652,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					if (td && td.enumName.length > 0) {
 						const en = fixedResults.completion.enums.find(en => en.name === td.enumName && en.mod === td.mod)
 						if (en) {
+							addUsedModule(en.mod)
 							for (const ev of en.values) {
 								const reqName = `${en.name} ${ev.name}`
 								if (token.name == reqName) {
@@ -1698,12 +1682,14 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				if (parentTypeDecl) {
 					typeDeclIter(parentTypeDecl, fixedResults.completion, (td, st, en, tf) => {
 						if (st) {
+							addUsedModule(st.mod)
 							const field = st.fields.find(f => f.name === token.name)
 							if (field) {
 								token.declAt = field._property ? (field._writeFn.decl ?? field._readFn.decl) : field
 							}
 						}
 						if (en) {
+							addUsedModule(en.mod)
 							const value = en.values.find(v => v.name === token.name)
 							if (value) {
 								token.declAt = value
@@ -1714,6 +1700,71 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				}
 				if (isRangeZeroEmpty(token.declAt._range))
 					token.declAt = typeDeclDefinition(parentTypeDecl, fixedResults.completion)
+			}
+
+			// mod usages data
+			if (token.kind == TokenKind.ExprCall || token.kind == TokenKind.ExprAddr) {
+				for (const fn of fixedResults.completion.functions) {
+					if (fn.name === token.name && fn.mod === token.mod) {
+						addUsedModule(fn.mod)
+						addUsedModule(fn.origMod)
+					}
+				}
+			}
+			//fallback to type decl
+			if (token.kind != TokenKind.Func && token.kind != TokenKind.ExprDebug && token.kind != TokenKind.ExprAddr && token.tdk.length > 0) {
+				const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+				if (td) {
+					addUsedModule(td.mod)
+				}
+			}
+		}
+
+
+		for (const mod of fixedResults.requirements) {
+			mod._uri = uri
+			mod._range = AtToRange(mod)
+			if (mod.req.length > 0)
+				mod._range.start.character -= "require ".length
+			const fileName = AtToUri(mod, uri, settings, res.dasRoot, fixedResults.filesCache)
+			const declAt: CompletionAt = {
+				_range: Range.create(0, 0, 0, 1),
+				_uri: fileName,
+				file: '',
+				line: 0,
+				column: 0,
+				lineEnd: 0,
+				columnEnd: 0,
+				_originalText: '',
+			}
+			fixedResults.tokens.unshift({
+				kind: TokenKind.Require,
+				name: mod.req,
+				mod: mod.mod,
+				_range: mod._range,
+				_uri: mod._uri,
+				_originalText: doc.getText(mod._range),
+				declAt: declAt,
+				alias: '',
+				value: '',
+				tdk: '',
+				parentTdk: '',
+				isUnused: false,
+				isConst: false,
+				file: mod.file,
+				line: mod.line,
+				column: mod.column,
+				lineEnd: mod.lineEnd,
+				columnEnd: mod.columnEnd,
+			})
+			if (!usedModules.has(mod.mod)) {
+				if (!diagnostics.has(uri))
+					diagnostics.set(uri, [])
+				diagnostics.get(uri).push({
+					range: mod._range,
+					message: `unused module ${mod.mod}`,
+					severity: mod.isPublic ? DiagnosticSeverity.Hint : DiagnosticSeverity.Information,
+				})
 			}
 		}
 

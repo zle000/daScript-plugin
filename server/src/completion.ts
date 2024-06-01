@@ -767,6 +767,7 @@ export function funcArgDocs(a: CompletionFuncArg) {
 export interface CompletionFunction extends CompletionAt {
     name: string
     mod: string
+    origMod: string
     cpp: string
     tdk: string
     decl: CompletionAt
@@ -815,6 +816,7 @@ export interface ValidationResult {
     completion: CompletionResult
     dasRoot: string
     requirements: ModuleRequirement[]
+    usedModules: string[]
 }
 
 export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string, cache: Map<string, string> = null) {
