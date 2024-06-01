@@ -731,12 +731,13 @@ connection.onHover(async (textDocumentPosition) => {
 
 			if (tok._uri.length > 0)
 				res += `\n// ${tok._uri}`
-			res += `\n// ${JSON.stringify(tok._range)}`
+			if (!isRangeZeroEmpty(tok._range))
+				res += `\n// ${JSON.stringify(tok._range)}`
 
 			if (tok.declAt._uri.length > 0)
-				res += `\n//@${tok.declAt._uri}`
+				res += `\n//@ ${tok.declAt._uri}`
 			if (!isRangeZeroEmpty(tok.declAt._range))
-				res += `\n//@${JSON.stringify(tok.declAt._range)}`
+				res += `\n//@ ${JSON.stringify(tok.declAt._range)}`
 		}
 
 	}
@@ -1572,6 +1573,44 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 
 		const tokens = fixedResults.tokens
 		fixedResults.tokens = []
+
+		for (const mod of fixedResults.requirements) {
+			mod._uri = uri
+			mod._range = AtToRange(mod)
+			if (mod.req.length > 0)
+				mod._range.start.character -= "require ".length
+			const fileName = AtToUri(mod, uri, settings, res.dasRoot, fixedResults.filesCache)
+			const declAt: CompletionAt = {
+				_range: Range.create(0, 0, 0, 1),
+				_uri: fileName,
+				file: '',
+				line: 0,
+				column: 0,
+				lineEnd: 0,
+				columnEnd: 0,
+				_originalText: '',
+			}
+			fixedResults.tokens.push({
+				kind: TokenKind.Require,
+				name: mod.req,
+				mod: mod.mod,
+				_range: mod._range,
+				_uri: mod._uri,
+				_originalText: doc.getText(mod._range),
+				declAt: declAt,
+				alias: '',
+				value: '',
+				tdk: '',
+				parentTdk: '',
+				isUnused: false,
+				isConst: false,
+				file: mod.file,
+				line: mod.line,
+				column: mod.column,
+				lineEnd: mod.lineEnd,
+				columnEnd: mod.columnEnd,
+			})
+		}
 
 		for (const token of tokens) {
 			token._uri = AtToUri(token, uri, settings, res.dasRoot, fixedResults.filesCache)

@@ -42,7 +42,7 @@ struct ValidateConfig
     fileAccessRoots : table<string; string>
 
 let WRITE_RESULT = true
-let WRITE_RESULT_TO_FILE = true
+let WRITE_RESULT_TO_FILE = false
 
 [export]
 def main()
@@ -101,6 +101,11 @@ struct DasError : CompletionAt
     cerr : int
     level : int // 0 error, 1 warning
 
+struct ModuleRequirement : CompletionAt
+    mod : string
+    req : string
+    isPublic : bool
+
 
 struct ValidationResult
     tokens : array<DasToken>
@@ -108,6 +113,7 @@ struct ValidationResult
     completion : CompletionResult
     dasRoot : string
     autoFormat : string
+    requirements : array<ModuleRequirement>
 
 
 def init_file_access(var access; fileAccessorRoots : table<string; string>)
@@ -171,6 +177,16 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                                 delete visitor
 
                             res.completion <- completion.result
+
+                            program |> for_each_require_declaration() <| $(mod, name, file, isPublic, at)
+                                var modReq <- [[ModuleRequirement()
+                                    mod = mod != null ? "{mod.name}" : "",
+                                    req = "{name}",
+                                    isPublic = isPublic
+                                ]]
+                                modReq |> fill_at(at)
+                                modReq.file = "{file}"
+                                res.requirements |> emplace(modReq)
 
                         if program == null
                             res.errors |> emplace([[DasError() what = "{error}", file=config.file ]])

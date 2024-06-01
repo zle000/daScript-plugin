@@ -99,6 +99,7 @@ export enum TokenKind {
     ExprAssume = 'ExprAssume',
     ExprDebug = 'ExprDebug',
     ExprConstEnumeration = 'ExprConstEnumeration',
+    Require = 'require',
 }
 
 export function isValidIdChar(ch: string) {
@@ -140,7 +141,9 @@ export interface DasToken extends CompletionAt {
 export function describeToken(tok: DasToken, cr: CompletionResult) {
     // cursed code, but it works
     let res = ''
-    if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.Func)
+    if (tok.kind == TokenKind.Require)
+        res += tok._originalText
+    else if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.Func)
         res += tok.value
     else if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
         const st = cr.structs.find(s => s.name === tok.name && s.mod === tok.mod)
@@ -797,11 +800,21 @@ export interface CompletionResult {
     functions: CompletionFunction[]
 }
 
+export interface ModuleRequirement extends CompletionAt {
+    mod: string
+    req: string
+    file: string
+    isPublic: boolean
+
+    _range: Range
+}
+
 export interface ValidationResult {
     errors: DasError[]
     tokens: DasToken[]
     completion: CompletionResult
     dasRoot: string
+    requirements: ModuleRequirement[]
 }
 
 export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string, cache: Map<string, string> = null) {
