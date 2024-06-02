@@ -1,6 +1,11 @@
 
 import {
 	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit, InlayHint, InlayHintKind,
+	CodeActionKind,
+	DiagnosticTag,
+	CodeAction,
+	LSPAny,
+	WorkspaceEdit,
 } from 'vscode-languageserver/node'
 
 import {
@@ -13,10 +18,18 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs, addUniqueLocation } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs, addUniqueLocation, ModuleRequirement } from './completion'
 import { shortTdk } from './completion'
 import { closedBracketPos } from './completion'
 
+enum DiagnosticsActionType {
+	UnusedReq = 0,
+}
+
+interface DiagnosticsAction {
+	type: DiagnosticsActionType
+	data: LSPAny
+}
 
 // Creates the LSP connection
 const connection = createConnection(ProposedFeatures.all)
@@ -111,7 +124,7 @@ connection.onInitialize((params) => {
 				workspaceFolders: {
 					supported: true,
 					changeNotifications: true,
-				}
+				},
 			},
 			textDocumentSync: {
 				openClose: true,
@@ -120,8 +133,39 @@ connection.onInitialize((params) => {
 					includeText: true,
 				},
 			},
+			codeActionProvider: {
+				codeActionKinds: [
+					CodeActionKind.QuickFix,
+					// CodeActionKind.Refactor,
+					// CodeActionKind.RefactorExtract,
+					// CodeActionKind.RefactorInline,
+					// CodeActionKind.RefactorRewrite,
+					// CodeActionKind.Source,
+					// CodeActionKind.SourceOrganizeImports,
+				],
+			},
 		}
 	}
+})
+
+
+connection.onCodeAction(async (params) => {
+	const res: CodeAction[] = []
+	if (params.context.only == null || params.context.only.includes(CodeActionKind.QuickFix)) {
+		for (const diag of params.context.diagnostics) {
+			const action = diag.data as DiagnosticsAction
+			if (action.type == DiagnosticsActionType.UnusedReq) {
+				const doc = documents.get(params.textDocument.uri)
+				if (doc) {
+					const range = Range.create(diag.range.start, Position.create(diag.range.start.line + 1, 0))
+					const cmd: WorkspaceEdit = { changes: {}, }
+					cmd.changes[params.textDocument.uri] = [TextEdit.del(range)]
+					res.push(CodeAction.create(`Remove unused requirement: '${action.data}'`, cmd, CodeActionKind.QuickFix))
+				}
+			}
+		}
+	}
+	return res
 })
 
 
@@ -1760,7 +1804,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				lineEnd: mod.lineEnd,
 				columnEnd: mod.columnEnd,
 			})
-			if (!usedModules.has(mod.mod)) {
+			if (!mod.isPublic && !usedModules.has(mod.mod)) {
 				let hasUsedDep = false
 				for (const dep of mod.dependencies) {
 					if (dep.isPublic && usedModules.has(dep.mod)) {
@@ -1771,10 +1815,16 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				if (!hasUsedDep) {
 					if (!diagnostics.has(uri))
 						diagnostics.set(uri, [])
+					const data: DiagnosticsAction = {
+						type: DiagnosticsActionType.UnusedReq,
+						data: mod.req,
+					}
 					diagnostics.get(uri).push({
 						range: mod._range,
-						message: `unused module ${mod.mod}`,
-						severity: mod.isPublic ? DiagnosticSeverity.Hint : DiagnosticSeverity.Information,
+						message: `unused module ${mod.req}`,
+						severity: DiagnosticSeverity.Hint,
+						tags: [DiagnosticTag.Unnecessary],
+						data: data,
 					})
 				}
 			}
