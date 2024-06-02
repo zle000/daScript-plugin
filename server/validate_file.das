@@ -274,9 +274,25 @@ class AstData : AstVisitor
     // TODO: tuple
     // TODO: typedef
 
+    def annotation_to_tokens(annotations : AnnotationList)
+        for ann in annotations
+            let annType = (ann.annotation.isBasicStructureAnnotation ? "BasicStructureAnnotation" :
+                ann.annotation.isFunctionAnnotation ? "FunctionAnnotation" :
+                ann.annotation.isStructureTypeAnnotation ? "StructureTypeAnnotation" :
+                ann.annotation.isStructureAnnotation ? "StructureAnnotation" :
+                ann.annotation.isTypeAnnotation ? "TypeAnnotation" :
+                "Annotation")
+            var token <- DasToken()
+            token.kind = "annotation"
+            token.name = annType
+            token.mod = ann.annotation._module != null ? "{ann.annotation._module.name}" : ""
+            token |> fill_at(ann.at)
+            res.tokens |> emplace(token)
+
     def override preVisitStructure(str : StructurePtr) : void
         if str == null
             return
+        str.annotations |> annotation_to_tokens()
         var token <- DasToken()
         token.kind = "struct"
         token.name = "{str.name}"
@@ -518,6 +534,8 @@ class AstData : AstVisitor
         if fun.flags._lambda
             return
 
+        fun.annotations |> annotation_to_tokens()
+
         var token <- DasToken()
         token.kind = "func"
         token |> fill_at(fun.at)
@@ -576,6 +594,7 @@ class AstData : AstVisitor
     [unused_argument(lastArg)] def override preVisitExprBlockArgument(blk : smart_ptr<ExprBlock>; arg : VariablePtr; lastArg : bool) : void
         if length(skipExprs) > 0 || blk == null || blk.genFlags.generated || arg.flags.generated
             return
+        blk.annotations |> annotation_to_tokens()
         var token <- DasToken()
         token.kind = "block_arg"
         token.name = "{arg.name}"
