@@ -1,26 +1,40 @@
 
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit, InlayHint, InlayHintKind,
-	CodeActionKind,
-	DiagnosticTag,
 	CodeAction,
+	CodeActionKind,
+	CompletionItem, CompletionItemKind,
+	Diagnostic,
+	DiagnosticSeverity,
+	DiagnosticTag,
+	DidChangeConfigurationNotification,
+	DocumentSymbol,
+	InlayHint, InlayHintKind,
 	LSPAny,
+	Location,
+	Position,
+	ProposedFeatures,
+	Range,
+	SymbolKind,
+	TextDocumentSyncKind,
+	TextDocuments,
+	TextEdit,
 	WorkspaceEdit,
+	WorkspaceFolder,
+	createConnection,
+	integer
 } from 'vscode-languageserver/node'
 
 import {
 	TextDocument
 } from 'vscode-languageserver-textdocument'
 
-import { URI } from 'vscode-uri'
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
+import { URI } from 'vscode-uri'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
 import os = require('os')
-import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs, addUniqueLocation, ModuleRequirement } from './completion'
-import { shortTdk } from './completion'
-import { closedBracketPos } from './completion'
 
 enum DiagnosticsActionType {
 	UnusedReq = 0,

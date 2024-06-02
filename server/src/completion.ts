@@ -1,9 +1,9 @@
+import { TextDocument } from 'vscode-languageserver-textdocument'
 import { CompletionItem, CompletionItemKind, Location, Position, Range, integer } from 'vscode-languageserver/node'
+import { URI } from 'vscode-uri'
 import { DasSettings } from './dasSettings'
 import fs = require('fs')
 import path = require('path')
-import { URI } from 'vscode-uri'
-import { TextDocument } from 'vscode-languageserver-textdocument'
 
 
 export enum Delimiter {
