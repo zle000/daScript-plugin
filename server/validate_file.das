@@ -101,10 +101,15 @@ struct DasError : CompletionAt
     cerr : int
     level : int // 0 error, 1 warning
 
+struct ModDeps
+    mod : string
+    isPublic : bool
+
 struct ModuleRequirement : CompletionAt
     mod : string
     req : string
     isPublic : bool
+    dependencies : array<ModDeps>
 
 
 struct ValidationResult
@@ -186,6 +191,21 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                                 ]]
                                 modReq |> fill_at(at)
                                 modReq.file = "{file}"
+                                if mod != null
+                                    var allMods : table<uint64>
+                                    var mods : array<tuple<mod : Module?; isPublic : bool>>
+                                    allMods |> insert(intptr(mod))
+                                    mods |> push([[auto mod, true]]) // root dep is public for local module
+                                    while length(mods) > 0
+                                        var mod2 = mods |> back()
+                                        mods |> pop()
+                                        mod2.mod |> module_for_each_dependency() <| $(dep, isPublic2)
+                                            var depData = [[ModDeps() mod = dep != null ? "{dep.name}" : "", isPublic = mod2.isPublic && isPublic2]]
+                                            modReq.dependencies |> emplace(depData)
+                                            if !allMods |> key_exists(intptr(dep))
+                                                mods |> push([[auto dep, isPublic2]])
+                                                allMods |> insert(intptr(dep))
+
                                 res.requirements |> emplace(modReq)
 
                         if program == null
@@ -356,7 +376,14 @@ class AstData : AstVisitor
                     token.isConst = field.field._type.flags.constant
                     *completion |> parse_typedecl(token.tdk, field.field._type)
         elif expr is ExprAddr
-            token.name = "{(expr as ExprAddr).target}"
+            let exprAddr = expr as ExprAddr
+            token.name = "{exprAddr.target}"
+            if exprAddr.func != null
+                token.declAt |> fill_at(exprAddr.func.at)
+                // if exprAddr.func.result != null
+                //     token.tdk = TypeDeclKey(exprAddr.func.result)
+                //     token.isConst = exprAddr.func.result.flags.constant
+                //     *completion |> parse_typedecl(token.tdk, exprAddr.func.result)
         else
             token.name = expr |> describe()
         res.tokens |> emplace(token)

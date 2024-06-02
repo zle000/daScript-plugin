@@ -801,11 +801,17 @@ export interface CompletionResult {
     functions: CompletionFunction[]
 }
 
+export interface ModDeps {
+    mod: string
+    isPublic: boolean
+}
+
 export interface ModuleRequirement extends CompletionAt {
     mod: string
     req: string
     file: string
     isPublic: boolean
+    dependencies : ModDeps[]
 
     _range: Range
 }
@@ -816,7 +822,6 @@ export interface ValidationResult {
     completion: CompletionResult
     dasRoot: string
     requirements: ModuleRequirement[]
-    usedModules: string[]
 }
 
 export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string, cache: Map<string, string> = null) {

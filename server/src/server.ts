@@ -1615,15 +1615,16 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 
 			if (isRangeZeroEmpty(token.declAt._range)) {
-				if (token.kind == TokenKind.ExprAddr) {
-					// function call
-					const func = fixedResults.completion.functions.find(f => f.name === token.name && f.mod === token.mod)
-					if (func) {
-						token.declAt = func
-						addUsedModule(token.mod)
-					}
-				}
-				else if (token.kind == TokenKind.Typedecl) {
+				// moved to validate_file.das
+				// if (token.kind == TokenKind.ExprAddr) {
+				// 	// function call
+				// 	const func = fixedResults.completion.functions.find(f => f.name === token.name && f.mod === token.mod)
+				// 	if (func) {
+				// 		token.declAt = func
+				// 		addUsedModule(token.mod)
+				// 	}
+				// }
+				if (token.kind == TokenKind.Typedecl) {
 					const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
 					if (td != null) {
 						addUsedModule(td.mod)
@@ -1726,9 +1727,11 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			mod._range = AtToRange(mod)
 			if (mod.req.length > 0)
 				mod._range.start.character -= "require ".length
-			const fileName = AtToUri(mod, uri, settings, res.dasRoot, fixedResults.filesCache)
+			let fileName = AtToUri(mod, uri, settings, res.dasRoot, fixedResults.filesCache)
+			if (!fs.existsSync(URI.parse(fileName).fsPath))
+				fileName = ''
 			const declAt: CompletionAt = {
-				_range: Range.create(0, 0, 0, 1),
+				_range: Range.create(0, 0, 0, fileName.length > 0 ? 1 : 0),
 				_uri: fileName,
 				file: '',
 				line: 0,
@@ -1758,13 +1761,22 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				columnEnd: mod.columnEnd,
 			})
 			if (!usedModules.has(mod.mod)) {
-				if (!diagnostics.has(uri))
-					diagnostics.set(uri, [])
-				diagnostics.get(uri).push({
-					range: mod._range,
-					message: `unused module ${mod.mod}`,
-					severity: mod.isPublic ? DiagnosticSeverity.Hint : DiagnosticSeverity.Information,
-				})
+				let hasUsedDep = false
+				for (const dep of mod.dependencies) {
+					if (dep.isPublic && usedModules.has(dep.mod)) {
+						hasUsedDep = true
+						break
+					}
+				}
+				if (!hasUsedDep) {
+					if (!diagnostics.has(uri))
+						diagnostics.set(uri, [])
+					diagnostics.get(uri).push({
+						range: mod._range,
+						message: `unused module ${mod.mod}`,
+						severity: mod.isPublic ? DiagnosticSeverity.Hint : DiagnosticSeverity.Information,
+					})
+				}
 			}
 		}
 
