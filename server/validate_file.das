@@ -400,6 +400,12 @@ class AstData : AstVisitor
                 //     token.tdk = TypeDeclKey(exprAddr.func.result)
                 //     token.isConst = exprAddr.func.result.flags.constant
                 //     *completion |> parse_typedecl(token.tdk, exprAddr.func.result)
+        elif expr is ExprGoto
+            let gt = expr as ExprGoto
+            token.name = "{gt.labelName}"
+        elif expr is ExprLabel
+            let lbl = expr as ExprLabel
+            token.name = "{lbl.labelName}"
         else
             token.name = expr |> describe()
         res.tokens |> emplace(token)

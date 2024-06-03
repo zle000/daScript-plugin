@@ -1697,7 +1697,9 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		const tokens = fixedResults.tokens
 		fixedResults.tokens = []
 
+		var tokenIdx = -1
 		for (const token of tokens) {
+			tokenIdx++
 			token._uri = AtToUri(token, uri, settings, res.dasRoot, fixedResults.filesCache)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
@@ -1778,11 +1780,6 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 						}
 					}
 				}
-				// else if (tok.kind == TokenKind.ExprGoto) {
-				// TODO: search label with same name
-				// name === goto label 0 -> label 0
-				// }
-
 			}
 			// if (isRangeZeroEmpty(token.declAt._range) && token.kind != TokenKind.Func && token.kind != TokenKind.ExprDebug) {
 			// 	if (token.tdk.length > 0) {
@@ -1813,6 +1810,46 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				}
 				if (isRangeZeroEmpty(token.declAt._range))
 					token.declAt = typeDeclDefinition(parentTypeDecl, fixedResults.completion)
+			}
+
+			for (const token of fixedResults.tokens) {
+				if (token._uri != uri)
+					continue
+				if (!isRangeZeroEmpty(token.declAt._range))
+					continue
+
+				if (token.kind == TokenKind.ExprGoto) {
+					const label = token.name
+					if (label.length > 0) {
+						let found = false
+						let prevIdx = tokenIdx - 1
+						while (prevIdx >= 0) {
+							const prevToken = tokens[prevIdx]
+							if (prevToken.kind == TokenKind.ExprLabel && prevToken.name == label && prevToken._uri == uri) {
+								token.declAt = prevToken
+								found = true
+								break
+							}
+							if (prevToken.kind == TokenKind.Func)
+								break
+							prevIdx--
+						}
+						if (!found) {
+							var nextIdx = tokenIdx + 1
+							while (nextIdx < tokens.length) {
+								const nextToken = tokens[nextIdx]
+								if (nextToken.kind == TokenKind.ExprLabel && nextToken.name == label && nextToken._uri == uri) {
+									token.declAt = nextToken
+									found = true
+									break
+								}
+								if (nextToken.kind == TokenKind.Func)
+									break
+								nextIdx++
+							}
+						}
+					}
+				}
 			}
 
 			// mod usages data

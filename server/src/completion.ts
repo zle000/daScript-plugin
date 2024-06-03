@@ -92,6 +92,7 @@ export enum TokenKind {
     Handle = 'handle',
     ExprAddr = 'ExprAddr',
     ExprGoto = 'ExprGoto',
+    ExprLabel = 'ExprLabel',
     ExprField = 'ExprField',
     FuncArg = 'func_arg',
     BlockArg = 'block_arg',
@@ -141,7 +142,11 @@ export interface DasToken extends CompletionAt {
 export function describeToken(tok: DasToken, cr: CompletionResult) {
     // cursed code, but it works
     let res = ''
-    if (tok.kind == TokenKind.Require)
+    if (tok.kind == TokenKind.ExprGoto)
+        res += `goto ${tok.name}`
+    else if (tok.kind == TokenKind.ExprLabel)
+        res += `label ${tok.name}`
+    else if (tok.kind == TokenKind.Require)
         res += tok._originalText
     else if (tok.kind == TokenKind.ExprCall || tok.kind == TokenKind.Func)
         res += tok.value
