@@ -30,7 +30,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -1788,6 +1788,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 		}
 
+		var allReq = new Map<string, { origin: ModuleRequirement, depth: number }>()
 
 		for (const mod of fixedResults.requirements) {
 			mod._uri = uri
@@ -1827,29 +1828,42 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				lineEnd: mod.lineEnd,
 				columnEnd: mod.columnEnd,
 			})
-			if (!mod.isPublic && !usedModules.has(mod.mod)) {
-				let hasUsedDep = false
-				for (const dep of mod.dependencies) {
-					if (dep.isPublic && usedModules.has(dep.mod)) {
-						hasUsedDep = true
-						break
+			allReq.set(mod.mod, { origin: mod, depth: 0 })
+			for (const req of mod.dependencies) {
+				let sub = allReq.get(req.mod)
+				if (sub != null) {
+					if (req.depth < sub.depth) {
+						sub.depth = req.depth
+						sub.origin = mod
 					}
+				} else {
+					allReq.set(req.mod, { origin: mod, depth: req.depth })
 				}
-				if (!hasUsedDep) {
-					if (!diagnostics.has(uri))
-						diagnostics.set(uri, [])
-					const data: DiagnosticsAction = {
-						type: DiagnosticsActionType.UnusedReq,
-						data: mod.req,
-					}
-					diagnostics.get(uri).push({
-						range: mod._range,
-						message: `unused module ${mod.req}`,
-						severity: DiagnosticSeverity.Hint,
-						tags: [DiagnosticTag.Unnecessary],
-						data: data,
-					})
+			}
+		}
+
+		for (const req of usedModules.keys()) {
+			const mod = allReq.get(req)
+			if (mod != null) {
+				mod.origin._used = true
+			}
+		}
+
+		for (const req of fixedResults.requirements) {
+			if (!req._used && !req.isPublic) {
+				if (!diagnostics.has(uri))
+					diagnostics.set(uri, [])
+				const data: DiagnosticsAction = {
+					type: DiagnosticsActionType.UnusedReq,
+					data: req.req,
 				}
+				diagnostics.get(uri).push({
+					range: req._range,
+					message: `unused module ${req.req}`,
+					severity: DiagnosticSeverity.Hint,
+					tags: [DiagnosticTag.Unnecessary],
+					data: data,
+				})
 			}
 		}
 

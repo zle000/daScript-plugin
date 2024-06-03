@@ -101,7 +101,7 @@ struct DasError : CompletionAt
 
 struct ModDeps
     mod : string
-    isPublic : bool
+    depth : int
 
 struct ModuleRequirement : CompletionAt
     mod : string
@@ -191,17 +191,19 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                                 modReq.file = "{file}"
                                 if mod != null
                                     var allMods : table<uint64>
-                                    var mods : array<tuple<mod : Module?; isPublic : bool>>
+                                    var mods : array<tuple<mod : Module?; depth : int>>
                                     allMods |> insert(intptr(mod))
-                                    mods |> push([[auto mod, true]]) // root dep is public for local module
+                                    mods |> push([[auto mod, 0]]) // root dep is public for local module
                                     while length(mods) > 0
                                         var mod2 = mods |> back()
                                         mods |> pop()
                                         mod2.mod |> module_for_each_dependency() <| $(dep, isPublic2)
-                                            var depData = [[ModDeps() mod = dep != null ? "{dep.name}" : "", isPublic = mod2.isPublic && isPublic2]]
+                                            return if !isPublic2
+
+                                            var depData = [[ModDeps() mod = dep != null ? "{dep.name}" : "", depth = mod2.depth + 1]]
                                             modReq.dependencies |> emplace(depData)
                                             if !allMods |> key_exists(intptr(dep))
-                                                mods |> push([[auto dep, isPublic2]])
+                                                mods |> push([[auto dep, mod2.depth + 1]])
                                                 allMods |> insert(intptr(dep))
 
                                 res.requirements |> emplace(modReq)

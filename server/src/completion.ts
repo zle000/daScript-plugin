@@ -803,7 +803,7 @@ export interface CompletionResult {
 
 export interface ModDeps {
     mod: string
-    isPublic: boolean
+    depth: number
 }
 
 export interface ModuleRequirement extends CompletionAt {
@@ -813,6 +813,7 @@ export interface ModuleRequirement extends CompletionAt {
     isPublic: boolean
     dependencies : ModDeps[]
 
+    _used : boolean
     _range: Range
 }
 
