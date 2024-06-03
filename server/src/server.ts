@@ -663,28 +663,34 @@ connection.onCompletion(async (textDocumentPosition) => {
 			fixCompletionSelf(it, replaceStart, textDocumentPosition.position)
 		}
 
-		if (actualTdk.length > 0 && (call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
-			// fill extension functions
-			for (const fn of fileData.completion.functions) {
-				if (fn.isClassMethod)
-					continue
-				if (fn.name.startsWith(PROPERTY_PREFIX))
-					continue
-				// TODO: ignore const cases: Foo const == Foo
-				if (fn.args.length > 0 && fn.args[0].tdk === actualTdk) {
-					const propertyName = fixPropertyName(fn.name)
-					const isProperty = propertyName != null
-					const isOperator = !isProperty && OPERATORS.includes(fn.name)
-					const c = CompletionItem.create(isProperty ? propertyName : fn.name)
-					c.detail = funcDetail(fn)
-					c.documentation = funcDocs(fn)
-					c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
-					const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`
-					fixCompletion(c, newText, replaceStart, textDocumentPosition.position)
-					c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT
-					const prev = res.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
-					if (prev == null)
-						res.push(c)
+		if ((call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
+			const tdks = [completionTdk]
+			if (actualTdk != completionTdk)
+				tdks.push(actualTdk)
+
+			for (const tdk of tdks) {
+				// fill extension functions
+				for (const fn of fileData.completion.functions) {
+					if (fn.isClassMethod)
+						continue
+					if (fn.name.startsWith(PROPERTY_PREFIX))
+						continue
+					// TODO: ignore const cases: Foo const == Foo
+					if (fn.args.length > 0 && fn.args[0].tdk === tdk) {
+						const propertyName = fixPropertyName(fn.name)
+						const isProperty = propertyName != null
+						const isOperator = !isProperty && OPERATORS.includes(fn.name)
+						const c = CompletionItem.create(isProperty ? propertyName : fn.name)
+						c.detail = funcDetail(fn)
+						c.documentation = funcDocs(fn)
+						c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
+						const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`
+						fixCompletion(c, newText, replaceStart, textDocumentPosition.position)
+						c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT
+						const prev = res.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
+						if (prev == null)
+							res.push(c)
+					}
 				}
 			}
 		}
