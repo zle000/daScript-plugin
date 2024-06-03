@@ -529,14 +529,15 @@ function addUniqueCompletionItem(res: CompletionItem[], c: CompletionItem) {
 }
 
 // returns actual CompletionTypeDecl
-export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): void {
-    typeDeclCompletion_(td, cr, delimiter, brackets, 0, res)
+export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
+    return typeDeclCompletion_(td, cr, delimiter, brackets, 0, res)
 }
-function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, depth: number, res: CompletionItem[]): void {
+function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delimiter: Delimiter, brackets: Brackets, depth: number, res: CompletionItem[]): CompletionTypeDecl {
     if (depth > 50) {
         console.error(`typeDeclCompletion: recursion depth exceeded for ${td.tdk}`)
-        return
+        return td
     }
+    let resultTd = td
     const dotDel = delimiter == Delimiter.Dot || delimiter == Delimiter.None
     const qDotDel = delimiter == Delimiter.QuestionDot
     const spaceDel = delimiter == Delimiter.Space
@@ -589,7 +590,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
         if (td1) {
             const td2 = cr.typeDecls.find(t => t.tdk === td1.tdk)
             if (td2 && td2 != td)
-                typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+                resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
             // else
             //     console.error(`typeDeclDefinition: failed to find type ${td1.tdk} in ${td.mod}`)
         }
@@ -607,7 +608,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
     if ((td.baseType === BaseType.tPointer || ((td.baseType === BaseType.tArray || td.dim.length > 0) && (brackets == Brackets.Square || brackets == Brackets.QuestionSquare))) && td.tdk1.length > 0) {
         const td1 = cr.typeDecls.find(t => t.tdk === td.tdk1)
         if (td1)
-            typeDeclCompletion_(td1, cr, delimiter, Brackets.None, depth + 1, res)
+            resultTd = typeDeclCompletion_(td1, cr, delimiter, Brackets.None, depth + 1, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
@@ -615,7 +616,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
     if (td.baseType === BaseType.tTable && (brackets == Brackets.Square || brackets == Brackets.QuestionSquare) && td.dim.length == 0 && td.tdk1.length > 0) {
         const td2 = cr.typeDecls.find(t => t.tdk === td.tdk2)
         if (td2)
-            typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+            resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
@@ -662,18 +663,18 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
         else if (td.baseType == BaseType.tRange64) {
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tInt64)
             if (td2)
-                typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+                resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         }
         else if (td.baseType == BaseType.tURange64) {
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
             if (td2)
-                typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+                resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
         }
     }
     if (delimiter == Delimiter.Is) {
         const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tBool)
         if (td2 && td2 != td)
-            typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+            resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
     }
     let searchOperatorName = brackets == Brackets.Square ? '[]' : brackets == Brackets.QuestionSquare ? '?[]' : ''
     if (searchOperatorName.length > 0) {
@@ -681,7 +682,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
             if (fn.args.length > 0 && fn.name == searchOperatorName && fn.args[0].tdk === td.tdk) {
                 const td2 = cr.typeDecls.find(t => t.tdk === fn.tdk)
                 if (td2) {
-                    typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+                    resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
                 }
             }
         }
@@ -705,6 +706,8 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
             }
         }
     }
+
+    return resultTd
 }
 
 
@@ -808,9 +811,9 @@ export interface ModuleRequirement extends CompletionAt {
     req: string
     file: string
     isPublic: boolean
-    dependencies: ModDeps[]
+    dependencies : ModDeps[]
 
-    _used: boolean
+    _used : boolean
     _range: Range
 }
 
