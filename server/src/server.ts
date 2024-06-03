@@ -30,7 +30,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, CompletionTypeDecl, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -476,10 +476,7 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 					let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
 					if (typeDeclData != null) {
 						var next: CompletionItem[] = []
-						const nextTdks = typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
-						// if (nextTdks.tdk != prevTdk) {
-						// 	call.tdks.add(nextTdks.tdk)
-						// }
+						typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
 						for (const it of next) {
 							if (it.label == call.obj) {
 								if (prevDelimiter == Delimiter.Is)
@@ -664,12 +661,16 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
 	const replaceStart = call.objRange.end
 	for (let completionTdk of call.tdks) {
-		let actualTdk = completionTdk
+		const tdks = [completionTdk]
 		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
 		if (typeDeclData != null) {
-			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
-			if (resTd.tdk.length > 0)
-				actualTdk = resTd.tdk
+			typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
+			typeDeclIter(typeDeclData, fileData.completion, (td, st, en, tf) => {
+				if (td.tdk.length > 0)
+					tdks.push(td.tdk)
+				if (tf && tf.tdk.length > 0)
+					tdks.push(tf.tdk)
+			})
 		}
 
 		for (let it of res) {
@@ -677,10 +678,6 @@ connection.onCompletion(async (textDocumentPosition) => {
 		}
 
 		if ((call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
-			const tdks = [completionTdk]
-			if (actualTdk != completionTdk)
-				tdks.push(actualTdk)
-
 			for (const tdk of tdks) {
 				// fill extension functions
 				for (const fn of fileData.completion.functions) {
