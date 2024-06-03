@@ -29,7 +29,6 @@ struct ValidateConfig
     file : string
     originalFile : string
     projectFile : string
-    args : string
     resultFile : string
     ignoreSharedModules : bool
     noGlobalVariables : bool
@@ -60,7 +59,6 @@ def main()
     config.file = args |> arg_value("--file", "")
     config.originalFile = args |> arg_value("--original-file", config.file)
     config.projectFile = args |> arg_value("--project-file", "")
-    config.args = args |> arg_value("--args", "")
     config.resultFile = args |> arg_value("--result", "")
 
     config.ignoreSharedModules = args |> has_value("--ignore-shared-modules")

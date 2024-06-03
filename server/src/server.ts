@@ -167,6 +167,8 @@ connection.onCodeAction(async (params) => {
 	const res: CodeAction[] = []
 	if (params.context.only == null || params.context.only.includes(CodeActionKind.QuickFix)) {
 		for (const diag of params.context.diagnostics) {
+			if (!diag.data)
+				continue
 			const action = diag.data as DiagnosticsAction
 			if (action.type == DiagnosticsActionType.UnusedReq) {
 				const doc = documents.get(params.textDocument.uri)
@@ -1277,13 +1279,15 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 	await fs.promises.writeFile(tempFilePath, textDocument.getText())
 	await fs.promises.writeFile(resultFilePath, '')
 
-	const args = settings.server.args.map(arg => arg.replace('${file}', 'validate_file.das'))
+	const workspaceFolder = URI.parse(workspaceFolders![0].uri).fsPath
+	const args = settings.server.args.map(
+		p => p.replace('${file}', 'validate_file.das').replace('${workspaceFolder}', workspaceFolder)
+	)
 	if (args.indexOf('--') < 0)
 		args.push('--')
 	args.push('--file', tempFilePath)
 	args.push('--original-file', filePath)
 	args.push('--result', resultFilePath)
-	args.push('--args', `"${settings.server.args.join(' ')}"`)
 	if (settings.project.file)
 		args.push('--project-file', settings.project.file)
 	if (settings.policies?.ignore_shared_modules)
@@ -1298,7 +1302,6 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 		args.push('--fail-on-lack-of-aot-export')
 	if (textDocument == globalCompletionFile)
 		args.push('--global-completion')
-	const workspaceFolder = URI.parse(workspaceFolders![0].uri).fsPath
 	for (const rootName in settings.project.fileAccessRoots) {
 		const fixedRoot = settings.project.fileAccessRoots[rootName].replace('${workspaceFolder}', workspaceFolder)
 		args.push('--file-access-root', `${rootName}:${fixedRoot}`)
