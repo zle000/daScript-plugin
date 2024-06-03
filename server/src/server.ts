@@ -292,45 +292,58 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 		// '.' ' ' '?.' '->' 'as' 'is' '?as' '|>'
 
 		// space can be delimiter only when chain is just started
-		if (line[i] === ' ') {
-			i -= 1
-			del = Delimiter.Space
-		}
-		else if (i > 0 && line[i] === '.' && line[i - 1] === '?') {
-			i -= 2
-			del = Delimiter.QuestionDot
-		}
-		else if (line[i] === '.') {
-			i -= 1
-			del = Delimiter.Dot
-		}
-		else if (i > 0 && line[i] === '>' && line[i - 1] === '-') {
-			i -= 2
-			del = Delimiter.Arrow
-		}
-		else if (i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?') {
-			i -= 3
-			del = Delimiter.QuestionAs
-		}
-		else if (i > 0 && line[i] === 's' && line[i - 1] === 'a') {
-			i -= 2
-			del = Delimiter.As
-		}
-		else if (i > 0 && line[i] === 's' && line[i - 1] === 'i') {
-			i -= 2
-			del = Delimiter.Is
-		}
-		else if (i > 0 && line[i] === '>' && line[i - 1] === '|') {
-			i -= 2
-			del = Delimiter.Pipe
-		}
-		else if (i > 0 && line[i] === ':' && line[i - 1] === ':') {
-			i -= 2
-			del = Delimiter.ColonColon
+		while (i >= 0) {
+			if (line[i] === ' ') {
+				i -= 1
+				del = Delimiter.Space
+				continue
+			}
+			else if (i > 0 && line[i] === '.' && line[i - 1] === '?') {
+				i -= 2
+				del = Delimiter.QuestionDot
+				break
+			}
+			else if (line[i] === '.') {
+				i -= 1
+				del = Delimiter.Dot
+				break
+			}
+			else if (i > 0 && line[i] === '>' && line[i - 1] === '-') {
+				i -= 2
+				del = Delimiter.Arrow
+				break
+			}
+			else if (i > 1 && line[i] === 's' && line[i - 1] === 'a' && line[i - 2] === '?') {
+				i -= 3
+				del = Delimiter.QuestionAs
+				break
+			}
+			else if (i > 0 && line[i] === 's' && line[i - 1] === 'a') {
+				i -= 2
+				del = Delimiter.As
+				break
+			}
+			else if (i > 0 && line[i] === 's' && line[i - 1] === 'i') {
+				i -= 2
+				del = Delimiter.Is
+				break
+			}
+			else if (i > 0 && line[i] === '>' && line[i - 1] === '|') {
+				i -= 2
+				del = Delimiter.Pipe
+				break
+			}
+			else if (i > 0 && line[i] === ':' && line[i - 1] === ':') {
+				i -= 2
+				del = Delimiter.ColonColon
+				break
+			}
+			else
+				break
 		}
 		delimiterRange.start.character = i
-		if (del === Delimiter.None)
-			break
+		// if (del === Delimiter.None)
+		// 	break
 		// skip spaces
 		for (; i >= 0; i--) {
 			const ch = line[i]
@@ -381,6 +394,9 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 			}
 		}
 
+		if (del == Delimiter.None && brackets == Brackets.None)
+			break
+
 		let obj = ''
 		for (; i >= 0; i--) {
 			const ch = line[i]
@@ -389,17 +405,26 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 			else
 				break
 		}
-		if (obj.length === 0) { break }
-		if (del === Delimiter.Space && i >= 0 && isSpaceChar(line[i]) && (obj == 'as' || obj == 'is' || obj == '?as')) {
-			// skip 'as' 'is' '?as' in case when space is delimiter and next char is space
-			i += obj.length // move back to beginning of the word
-			continue
-		}
+		if (obj.length === 0 && brackets == Brackets.None) { break }
+		// if (del === Delimiter.Space && i >= 0 && isSpaceChar(line[i]) && (obj == 'as' || obj == 'is' || obj == '?as')) {
+		// 	// skip 'as' 'is' '?as' in case when space is delimiter and next char is space
+		// 	i += obj.length // move back to beginning of the word
+		// 	continue
+		// }
 
 		// space delimiter can be only at the beginning of the chain
 		if (del == Delimiter.Space && res.length >= 2)
 			break
 		const objRange = Range.create(pos.line, i + 1, pos.line, tokenEnd)
+		if (obj == '' && brackets == Brackets.Round && rangeLength(objRange) > 0) {
+			const subStart = Position.create(objRange.end.line, objRange.end.character - 1)
+			const sub = findCallChain_(doc, fileData, subStart, forAutocompletion, recursion + 1)
+			if (sub.length > 1) {
+				sub.pop()
+				res = sub.concat(res)
+				continue
+			}
+		}
 		res.unshift({ obj: obj, objRange: objRange, tokens: [], tdks: new Set(), delimiter: del, brackets: brackets, delimiterRange: delimiterRange })
 	}
 
@@ -437,9 +462,8 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 		}
 		const call = callChain[idx]
 		idx++
-		// maybe already exists token
-		if (call.tokens.length > 0) {
-			call.tdks = tokensToTdks(call.tokens)
+		// maybe already resolved node
+		if (call.tdks.size > 0) {
 			prevTdks = call.tdks
 			continue
 		}
@@ -469,31 +493,39 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 				continue
 			}
 		}
-		if (call.obj.length > 0) {
-			if (prevTdks && prevTdks.size > 0) {
-				// resolve tdk for type decls
-				for (const prevTdk of prevTdks) {
-					let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
-					if (typeDeclData != null) {
-						var next: CompletionItem[] = []
-						const nextTdks = typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
-						// if (nextTdks.tdk != prevTdk) {
-						// 	call.tdks.add(nextTdks.tdk)
-						// }
-						for (const it of next) {
-							if (it.label == call.obj) {
-								if (prevDelimiter == Delimiter.Is)
-									call.tdks.add(BaseType.tBool)
-								else if (it.data?.length > 0)
-									call.tdks.add(it.data)
+		if (prevTdks && prevTdks.size > 0) {
+			// resolve tdk for type decls
+			for (const prevTdk of prevTdks) {
+				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
+				if (typeDeclData != null) {
+					var next: CompletionItem[] = []
+					if (call.obj.length == 0 && call.brackets == Brackets.Square) {
+						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, next)
+						if (nextTdk.tdk != prevTdk) {
+							call.tdks.add(nextTdk.tdk)
+						}
+					}
+					if (call.obj.length > 0) {
+						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
+						if (call.obj.length > 0) {
+							for (const it of next) {
+								if (it.label == call.obj) {
+									if (prevDelimiter == Delimiter.Is)
+										call.tdks.add(BaseType.tBool)
+									else if (it.data?.length > 0)
+										call.tdks.add(it.data)
+								}
 							}
 						}
 					}
 				}
-				prevTdks = call.tdks
-				if (call.tdks.size > 0)
-					continue
 			}
+			if (call.tdks.size > 0) {
+				prevTdks = call.tdks
+				continue
+			}
+		}
+		if (call.obj.length > 0) {
 			if (call.delimiter == Delimiter.Space) {
 				// maybe enum
 				let found = false
@@ -520,10 +552,10 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 						call.tdks.add(fn.tdk)
 					}
 				}
-			}
-			else if (call.delimiter == Delimiter.ColonColon) {
-				// just skip module names
-				continue
+				if (call.tdks.size > 0) {
+					prevTdks = call.tdks
+					continue
+				}
 			}
 		}
 		// failed to resolve tdk
