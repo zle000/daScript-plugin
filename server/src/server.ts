@@ -173,10 +173,23 @@ connection.onCodeAction(async (params) => {
 			if (action.type == DiagnosticsActionType.UnusedReq) {
 				const doc = documents.get(params.textDocument.uri)
 				if (doc) {
-					const range = Range.create(diag.range.start, Position.create(diag.range.start.line + 1, 0))
 					const cmd: WorkspaceEdit = { changes: {}, }
+					const range = Range.create(diag.range.start, Position.create(diag.range.start.line + 1, 0))
 					cmd.changes[params.textDocument.uri] = [TextEdit.del(range)]
 					res.push(CodeAction.create(`Remove unused requirement: '${action.data}'`, cmd, CodeActionKind.QuickFix))
+
+					const fileData = await getDocumentData(params.textDocument.uri)
+					if (fileData) {
+						const cmdAll = { changes: {}, }
+						for (const req of fileData.requirements) {
+							if (!req._used) {
+								const range = Range.create(req._range.start, Position.create(req._range.start.line + 1, 0))
+								cmdAll.changes[params.textDocument.uri] = cmdAll.changes[params.textDocument.uri] || []
+								cmdAll.changes[params.textDocument.uri].push(TextEdit.del(range))
+							}
+						}
+						res.push(CodeAction.create(`Remove all unused requirements`, cmdAll, CodeActionKind.QuickFix))
+					}
 				}
 			}
 		}
