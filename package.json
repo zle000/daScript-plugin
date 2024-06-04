@@ -350,6 +350,16 @@
 				"language": "dascript",
 				"path": "./snippets/dascript.json"
 			}
+		],
+		"commands": [
+			{
+				"command": "dascript.revalidateWorkspace",
+				"title": "daScript: Revalidate workspace"
+			},
+			{
+				"command": "dascript.cancelValidation",
+				"title": "daScript: Cancel workspace validation"
+			}
 		]
 	},
 	"scripts": {

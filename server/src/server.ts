@@ -1,6 +1,30 @@
 
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, WorkspaceFolder, DidChangeConfigurationNotification, integer, Range, Diagnostic, DiagnosticRelatedInformation, CompletionItem, CompletionItemKind, Location, DiagnosticSeverity, SymbolKind, Position, DocumentSymbol, TextEdit, InlayHint, InlayHintKind,
+	createConnection,
+	TextDocuments,
+	ProposedFeatures,
+	TextDocumentSyncKind,
+	WorkspaceFolder,
+	DidChangeConfigurationNotification,
+	integer,
+	Range,
+	Diagnostic,
+	DiagnosticRelatedInformation,
+	CompletionItem,
+	CompletionItemKind,
+	Location,
+	DiagnosticSeverity,
+	SymbolKind,
+	Position,
+	DocumentSymbol,
+	TextEdit,
+	InlayHint,
+	InlayHintKind,
+	DidChangeWorkspaceFoldersNotification,
+	NotificationType,
+	WorkDoneProgressBegin,
+	WorkDoneProgressReport,
+	WorkDoneProgressEnd,
 } from 'vscode-languageserver/node'
 
 import {
@@ -13,9 +37,14 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidLocation, isValidIdChar, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs, addUniqueLocation } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addValidLocation, baseTypeIsEnum, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs, addUniqueLocation } from './completion'
 import { shortTdk } from './completion'
 import { closedBracketPos } from './completion'
+import { extname, join, resolve } from 'path'
+import { readFile, readdir, stat, statSync } from 'fs'
+import { promisify } from 'util'
+import { zip, range, last } from 'lodash'
+import { ValidatingQueue } from './validatingQueue'
 
 
 // Creates the LSP connection
@@ -1066,7 +1095,109 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	return res
 })
 
-connection.onInitialized(() => {
+async function validateWorkspaceFolder(dir: string): Promise<void> {
+	let foldersToVisit: string[] = [dir]
+	let validatingQueue: ValidatingQueue = new ValidatingQueue(5);
+	const ignoredFolders: string[] = [".git", ".github"]	
+	const token = `validation/${dir}`;
+
+	await connection.sendRequest("window/workDoneProgress/create", {
+		token,
+	});
+	await connection.sendNotification(
+		"$/progress",
+		{
+			token,
+			value: <WorkDoneProgressBegin>{
+				kind: "begin",
+				title: `Validation`,
+				message: "Collecting files to validate...",
+				percentage: 0,
+			}
+		}
+	);
+
+	let filesToValidate: string[] = [];
+	while (foldersToVisit.length !== 0) {
+		const files = await promisify(readdir)(foldersToVisit[0]);
+		const fileStats = await Promise.all(files
+			.map(file => promisify(stat)(join(foldersToVisit[0], file)))
+		)
+
+		for (let i = 0; i < files.length; i++) {
+			const path = join(foldersToVisit[0], files[i]);
+			const isIgnored: boolean = ignoredFolders
+				.filter(ignored => path.endsWith(ignored))
+				.length !== 0
+
+			if (isIgnored) {
+				continue;
+			}
+
+			if (fileStats[i].isDirectory()) {
+				foldersToVisit.push(path);
+			}
+			else if (path.endsWith(".das")) {
+				filesToValidate.push(path);
+			}
+		}
+
+		foldersToVisit.shift();
+	}
+
+	for (const [file, i] of zip(filesToValidate, range(1, filesToValidate.length))) {
+		if (validationCancelled) {
+			return;
+		}
+
+		const validationCacheFile = path.resolve('.dascript', `${last(file.split("/"))}.json`)
+
+		try {
+			const cachedValidation = JSON.parse(
+				(await promisify(fs.readFile)(validationCacheFile)).toString('utf-8')
+			);
+
+			console.log(`Found validation cache file, ${validationCacheFile}`);
+			validatingResults[file] = cachedValidation;
+
+			continue;
+		}
+		catch (err) {
+			console.log(`Validation cache file not found, ${validationCacheFile}`);
+		}
+
+		await connection.sendNotification(
+			"$/progress",
+			{
+				token,
+				value: <WorkDoneProgressReport>{
+					kind: "report",
+					message: `(${i}/${filesToValidate.length}) ${path.relative(dir, file)}`,
+					percentage: (i / filesToValidate.length) * 100,
+				}
+			}
+		);
+
+		await validatingQueue.enqueue(
+			file,
+			async () => {
+				await validateTextDocument(TextDocument.create(
+					file,
+					"dascript",
+					1,
+					(await promisify(readFile)(file)).toString()
+				));
+			}
+		)
+	}
+
+	await connection.sendNotification(
+		"$/progress",
+		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
+	);
+}
+
+connection.onInitialized(async () => {
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined)
@@ -1076,6 +1207,18 @@ connection.onInitialized(() => {
 			// TODO: support multiple workspace folders
 			connection.console.log('Workspace folder change event received.')
 		})
+	}
+})
+
+let validationCancelled = false;
+connection.onExecuteCommand(async (params) => {
+	if (params.command == 'cancelValidation') {
+		validationCancelled = true;
+		return;
+	}
+
+	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+		await validateWorkspaceFolder(folder);
 	}
 })
 
@@ -1292,7 +1435,9 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			return
 		}
 
-		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
+		console.log(documents.get(textDocument.uri) );
+		console.log(documents.get(textDocument.uri) == null);
+		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri) != null && documents.get(textDocument.uri)?.version !== textDocument.version) {
 			console.log('document version changed, ignoring result', textDocument.uri)
 			thisResolve()
 			return
@@ -1794,7 +1939,16 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 	}
 
-	validatingResults.set(uri, fixedResults)
+	validatingResults.set(uri, fixedResults);
+
+	if (!fs.existsSync(path.resolve(".dascript"))) {
+		fs.mkdirSync(path.resolve(".dascript"));
+	}
+
+	fs.appendFileSync(
+		path.resolve('.dascript', `${last(uri.split("/"))}.json`),
+		JSON.stringify(fixedResults)
+	)
 
 	connection.languages.inlayHint.refresh()
 }
