@@ -348,7 +348,7 @@ def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : 
     fn |> fill_at(f.at)
     if f._module != null
         fn.mod = f._module.name |> string()
-    var inscope origin <- f.origin
+    var origin = f.origin
     if origin != null && origin._module != null
         fn.origMod = origin._module.name |> string()
     if f.result != null

@@ -30,7 +30,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, moduleTdk, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -1159,6 +1159,8 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 					var skip = 0
 					while (nextToken.kind == TokenKind.FuncArg) {
 						skip += 2
+						if (idx + skip >= n)
+							break
 						nextToken = fileData.tokens[idx + skip]
 					}
 				}
@@ -1523,7 +1525,9 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 		const map = new Array<Map<string, CompletionItem>>()
 		function addMod(name: string, at: CompletionAt) {
-			if (name?.length > 0 && !modules.has(name)) {
+			if (name?.length == 0)
+				return
+			if (!modules.has(name)) {
 				modules.add(name)
 				addCompletionItem(map, {
 					label: name,
@@ -1531,9 +1535,10 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					detail: `module ${name}`,
 					documentation: `module ${name}\n${at.file}`,
 				})
-				if (at._uri == uri)
-					addUsedModule(name)
+
 			}
+			if (at._uri == uri)
+				addUsedModule(name)
 		}
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)
@@ -1557,7 +1562,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 		}
 		for (const s of res.completion.structs) {
-			// s.column = Math.max(s.column - 5, 0) // magic number to fix column
+			s.column++ // magic number to fix column
 			s._range = AtToRange(s)
 			s._uri = AtToUri(s, uri, settings, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(map, {
@@ -1567,6 +1572,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				documentation: structDocs(s),
 			})
 			addMod(s.mod, s)
+			if (s._uri == uri && s.parentMod.length > 0)
+				addMod(s.parentMod, s)
 			for (const sf of s.fields) {
 				// TODO: search for the field end using textDocument.getText()
 				// sf.columnEnd += sf.tdk.length + 1 // 1 char for ':'
@@ -1698,16 +1705,39 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		fixedResults.tokens = []
 
 		var tokenIdx = -1
+		var prevToken: DasToken = null
 		for (const token of tokens) {
 			tokenIdx++
 			token._uri = AtToUri(token, uri, settings, res.dasRoot, fixedResults.filesCache)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
 			addUsedModule(token.mod)
-			if (token.kind == TokenKind.ExprField)
-				token.columnEnd += token.name.length
 			token._range = AtToRange(token)
 			token._originalText = doc.getText(token._range)
+			if (token.kind == TokenKind.Struct) {
+				token._range.start.character++ // magic number to fix column
+				token._originalText = doc.getText(token._range)
+			}
+			else if (token.kind == TokenKind.ExprField) {
+				if (token._originalText == '->') {
+					// convert foo|->|bar to foo->|bar|
+					token._range.start.character += 2
+					token._range.end.character += token.name.length
+					token._originalText = doc.getText(token._range)
+				}
+				else if (token.name == 'self' && rangeLength(token._range) < token.name.length) {
+					// skip autogenerated self-s
+					token.declAt.line = -1
+				}
+			}
+			else if (token.kind == TokenKind.Typedecl) {
+				if (prevToken && isRangeEqual(prevToken._range, token._range)) {
+					// skip autogenerated typedecl-s with the same range
+					token._range.start.character = token._range.end.character
+					token._originalText = ''
+					token.declAt.line = -1
+				}
+			}
 			// declAt is negative for tokens that are not declared in the source code
 			if (token.declAt.line >= 0) {
 				token.declAt._range = AtToRange(token.declAt)
@@ -1739,19 +1769,21 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				// 	}
 				// }
 				if (token.kind == TokenKind.Typedecl) {
-					const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
-					if (td != null) {
-						addUsedModule(td.mod)
-						const td2 = typeDeclDefinition(td, fixedResults.completion)
-						if (td2 != null) {
-							token.declAt = td2
-						}
-					}
-					if (isRangeZeroEmpty(token.declAt._range) && token.alias.length > 0) {
-						const td = fixedResults.completion.typeDefs.find(td => td.name === token.alias && td.mod === token.mod)
+					if (!isRangeLengthZero(token._range)) {
+						const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
 						if (td != null) {
 							addUsedModule(td.mod)
-							token.declAt = td
+							const td2 = typeDeclDefinition(td, fixedResults.completion)
+							if (td2 != null) {
+								token.declAt = td2
+							}
+						}
+						if (isRangeZeroEmpty(token.declAt._range) && token.alias.length > 0) {
+							const td = fixedResults.completion.typeDefs.find(td => td.name === token.alias && td.mod === token.mod)
+							if (td != null) {
+								addUsedModule(td.mod)
+								token.declAt = td
+							}
 						}
 					}
 				}
@@ -1868,6 +1900,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					addUsedModule(td.mod)
 				}
 			}
+
+			prevToken = token
 		}
 
 		var allReq = new Map<string, { origin: ModuleRequirement, depth: number }>()

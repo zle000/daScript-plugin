@@ -816,9 +816,9 @@ export interface ModuleRequirement extends CompletionAt {
     req: string
     file: string
     isPublic: boolean
-    dependencies : ModDeps[]
+    dependencies: ModDeps[]
 
-    _used : boolean
+    _used: boolean
     _range: Range
 }
 
@@ -873,8 +873,8 @@ export function AtToRange(at: CompletionAt) {
         Math.max(0, at.line - 1), at.column,
         Math.max(0, at.lineEnd - 1), at.columnEnd
     )
-    if (res.end.character > 0 && at.line === at.lineEnd)
-        res.end.character += 1 // magic, don't ask, it works
+    // if (res.end.character > 0 && at.line === at.lineEnd)
+    //     res.end.character += 1 // magic, don't ask, it works
     return res
 }
 
@@ -927,7 +927,7 @@ export function isRangeZeroEmpty(a: Range) {
 
 // range with zero length
 export function isRangeLengthZero(a: Range) {
-    return a.start.line === a.end.line && a.end.character - a.start.character <= 1
+    return a.start.line === a.end.line && a.end.character - a.start.character == 0
 }
 
 export function isPositionLess(a: Position, b: Position) {
@@ -948,6 +948,14 @@ export function isPositionLessOrEqual(a: Position, b: Position) {
 
 export function isPositionEqual(a: Position, b: Position) {
     return a.line == b.line && a.character == b.character
+}
+
+export function moduleTdk(tdk: string): string {
+    const till = tdk.indexOf("<")
+    const skip = tdk.indexOf("::")
+    if (skip > 0 && (till < 0 || skip < till))
+        return tdk.substring(0, skip)
+    return ""
 }
 
 export function shortTdk(tdk: string): string {
