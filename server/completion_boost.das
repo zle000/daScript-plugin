@@ -212,7 +212,9 @@ def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Struct
     res.result.structs |> emplace(st)
 
 /// type decl
-def cleanupTDK(str : string) : string
+// TODO: support optional type (split by | )
+// TODO: keep full type name as separate field (for preview)
+def private cleanupTDK(str : string) : string
     var parts <- str |> split("const?")
 
     for res in parts
