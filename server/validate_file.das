@@ -250,7 +250,7 @@ struct DasToken : CompletionAt
         token.tdk = TypeDeclKey(expr._type)
         token.alias = expr._type.alias |> string()
         token.isConst = expr._type.flags.constant
-        // *completion |> parse_typedecl(token.tdk, expr._type)
+        *completion |> parse_typedecl(token.tdk, expr._type)
     token |> fill_at(expr.at)
     // token.ptr = intptr(expr |> get_ptr())
     return token
@@ -307,7 +307,7 @@ class AstData : AstVisitor
             token2.name = "{fld.name}"
             token2.tdk = TypeDeclKey(fld._type)
             token2.isConst = fld._type.flags.constant
-            // *completion |> parse_typedecl(token2.tdk, fld._type)
+            *completion |> parse_typedecl(token2.tdk, fld._type)
             token2.mod = token.mod
             token2 |> fill_at(fld.at)
             res.tokens |> emplace(token2)
@@ -323,7 +323,7 @@ class AstData : AstVisitor
         token.tdk = TypeDeclKey(decl.value._type)
         token.parentTdk = TypeDeclKey(expr._type)
         // token.isConst = decl.flags.
-        // *completion |> parse_typedecl(token.tdk, decl.value._type)
+        *completion |> parse_typedecl(token.tdk, decl.value._type)
         token |> fill_at(decl.at)
         // token.declAt |> fill_at(expr._type.at)
         res.tokens |> emplace(token)
@@ -336,7 +336,7 @@ class AstData : AstVisitor
             return -1
         visitedTypedecls |> insert(intptr(typ))
         let tdk = TypeDeclKey(typ)
-        // *completion |> parse_typedecl(tdk, typ)
+        *completion |> parse_typedecl(tdk, typ)
         var token <- DasToken()
         token.kind = "typedecl"
         // token.name = tdk
@@ -394,16 +394,16 @@ class AstData : AstVisitor
                 if field.field._type != null
                     token.tdk = TypeDeclKey(field.field._type)
                     token.isConst = field.field._type.flags.constant
-                    // *completion |> parse_typedecl(token.tdk, field.field._type)
+                    *completion |> parse_typedecl(token.tdk, field.field._type)
         elif expr is ExprAddr
             let exprAddr = expr as ExprAddr
             token.name = "{exprAddr.target}"
             if exprAddr.func != null
                 token.declAt |> fill_at(exprAddr.func.at)
-                // if exprAddr.func.result != null
-                //     token.tdk = TypeDeclKey(exprAddr.func.result)
+                if exprAddr.func.result != null
+                    let resTdk = TypeDeclKey(exprAddr.func.result)
                 //     token.isConst = exprAddr.func.result.flags.constant
-                //     *completion |> parse_typedecl(token.tdk, exprAddr.func.result)
+                    *completion |> parse_typedecl(resTdk, exprAddr.func.result)
         elif expr is ExprGoto
             let gt = expr as ExprGoto
             token.name = "{gt.labelName}"
@@ -446,14 +446,14 @@ class AstData : AstVisitor
                 if a._type != null
                     let atdk = TypeDeclKey(a._type)
                     token.value += ": {atdk}"
-                    // *completion |> parse_typedecl(atdk, a._type)
+                    *completion |> parse_typedecl(atdk, a._type)
                 if a.init != null
                     token.value += " = {a.init |> describe()}"
             token.value += ")"
             if expr.func.result != null
                 let restdk = TypeDeclKey(expr.func.result)
                 token.value += ": {restdk}"
-                // *completion |> parse_typedecl(restdk, expr.func.result)
+                *completion |> parse_typedecl(restdk, expr.func.result)
         res.tokens |> emplace(token)
 
     def override preVisitExprCall(expr : smart_ptr<ExprCall>) : void
@@ -471,7 +471,7 @@ class AstData : AstVisitor
                 token.tdk = TypeDeclKey(v._type)
                 token.alias = v._type.alias |> string()
                 token.isConst = v._type.flags.constant
-                // *completion |> parse_typedecl(token.tdk, v._type)
+                *completion |> parse_typedecl(token.tdk, v._type)
             token |> fill_at(v.at)
             if v.init != null
                 token.value = v.init |> describe()
@@ -488,7 +488,7 @@ class AstData : AstVisitor
             token.tdk = TypeDeclKey(svar._type)
             token.alias = svar._type.alias |> string()
             token.isConst = svar._type.flags.constant
-        // *completion |> parse_typedecl(token.tdk, svar._type)
+        *completion |> parse_typedecl(token.tdk, svar._type)
         token |> fill_at(svar.at)
         if svar.init != null
             token.value = svar.init |> describe()
@@ -514,7 +514,7 @@ class AstData : AstVisitor
             token.tdk = TypeDeclKey(expr.variable._type)
             token.isConst = expr.variable._type.flags.constant
             token.alias = expr.variable._type.alias |> string()
-            // *completion |> parse_typedecl(token.tdk, expr.variable._type)
+            *completion |> parse_typedecl(token.tdk, expr.variable._type)
         // if expr._type != null
         //     token.isConst = expr._type.flags.constant
         //     token.tdk = TypeDeclKey(expr._type)
@@ -555,7 +555,7 @@ class AstData : AstVisitor
             token.tdk = tdk
             token.alias = fun.result.alias |> string()
             token.isConst = fun.result.flags.constant
-            // *completion |> parse_typedecl(tdk, fun.result)
+            *completion |> parse_typedecl(tdk, fun.result)
         token.mod = fun._module != null ? "{fun._module.name}" : ""
         funcModule = token.mod
         token.declAt |> fill_at(fun.atDecl)
@@ -570,14 +570,14 @@ class AstData : AstVisitor
             if a._type != null
                 let atdk = TypeDeclKey(a._type)
                 token.value += ": {atdk}"
-                // *completion |> parse_typedecl(atdk, a._type)
+                *completion |> parse_typedecl(atdk, a._type)
             if a.init != null
                 token.value += " = {a.init |> describe()}"
         token.value += ")"
         if fun.result != null
             let restdk = TypeDeclKey(fun.result)
             token.value += ": {restdk}"
-            // *completion |> parse_typedecl(restdk, fun.result)
+            *completion |> parse_typedecl(restdk, fun.result)
         res.tokens |> emplace(token)
 
 
@@ -592,7 +592,7 @@ class AstData : AstVisitor
         token.tdk = TypeDeclKey(arg._type)
         token.alias = arg._type.alias |> string()
         token.isConst = arg._type.flags.constant
-        // *completion |> parse_typedecl(token.tdk, arg._type)
+        *completion |> parse_typedecl(token.tdk, arg._type)
         token.mod = fun._module != null ? "{fun._module.name}" : ""
         token |> fill_at(arg.at)
         res.tokens |> emplace(token)
@@ -613,7 +613,7 @@ class AstData : AstVisitor
         token.tdk = TypeDeclKey(arg._type)
         token.alias = arg._type.alias |> string()
         token.isConst = arg._type.flags.constant
-        // *completion |> parse_typedecl(token.tdk, arg._type)
+        *completion |> parse_typedecl(token.tdk, arg._type)
         token.mod = arg._module != null ? "{arg._module.name}" : ""
         if token.mod == ""
             token.mod = funcModule
@@ -684,6 +684,6 @@ class AstData : AstVisitor
                 token.tdk = TypeDeclKey(expr.subexpr._type)
                 token.isConst = expr.subexpr._type.flags.constant
                 token.alias = expr.subexpr._type.alias |> string()
-                // *completion |> parse_typedecl(token.tdk, expr.subexpr._type)
+                *completion |> parse_typedecl(token.tdk, expr.subexpr._type)
         token |> fill_at(expr.at)
         res.tokens |> emplace(token)
