@@ -674,6 +674,12 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, delim
             const td2 = cr.typeDecls.find(t => t.tdk === BaseType.tUInt64)
             if (td2)
                 resultTd = typeDeclCompletion_(td2, cr, delimiter, Brackets.None, depth + 1, res)
+        } else if (td.baseType == BaseType.tBlock) {
+            const c = CompletionItem.create('invoke')
+            c.kind = CompletionItemKind.Keyword
+            c.insertText = ' |> invoke('
+            addUniqueCompletionItem(res, c)
+
         }
     }
     if (delimiter == Delimiter.Is) {

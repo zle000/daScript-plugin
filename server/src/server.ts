@@ -692,20 +692,22 @@ connection.onCompletion(async (textDocumentPosition) => {
 	if (callChain.length === 0)
 		return getGlobalCompletion(fileData.completionItems)
 
-	const res: CompletionItem[] = []
+	const res = new Array<Map<string, CompletionItem>>()
 	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
 	const replaceStart = call.objRange.end
 	for (let completionTdk of call.tdks) {
 		let actualTdk = completionTdk
 		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
+		const items: CompletionItem[] = []
 		if (typeDeclData != null) {
-			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, res)
+			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, items)
 			if (resTd.tdk.length > 0)
 				actualTdk = resTd.tdk
-		}
 
-		for (let it of res) {
-			fixCompletionSelf(it, replaceStart, textDocumentPosition.position)
+			for (let it of items) {
+				fixCompletionSelf(it, replaceStart, textDocumentPosition.position)
+				addCompletionItem(res, it)
+			}
 		}
 
 		if ((call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
@@ -732,9 +734,9 @@ connection.onCompletion(async (textDocumentPosition) => {
 						const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`
 						fixCompletion(c, newText, replaceStart, textDocumentPosition.position)
 						c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT
-						const prev = res.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
+						const prev = items.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
 						if (prev == null)
-							res.push(c)
+							addCompletionItem(res, c)
 					}
 				}
 			}
@@ -748,7 +750,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 				c.documentation = enumDocs(en)
 				c.kind = CompletionItemKind.Enum
 				c.sortText = FIELD_SORT
-				res.push(c)
+				addCompletionItem(res, c)
 			}
 		}
 		for (const st of fileData.completion.structs) {
@@ -758,7 +760,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 				c.documentation = structDocs(st)
 				c.kind = CompletionItemKind.Struct
 				c.sortText = FIELD_SORT
-				res.push(c)
+				addCompletionItem(res, c)
 			}
 		}
 		for (const fn of fileData.completion.functions) {
@@ -768,7 +770,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 				c.documentation = funcDocs(fn)
 				c.kind = CompletionItemKind.Function
 				c.sortText = FIELD_SORT
-				res.push(c)
+				addCompletionItem(res, c)
 			}
 		}
 		for (const td of fileData.completion.typeDefs) {
@@ -778,11 +780,15 @@ connection.onCompletion(async (textDocumentPosition) => {
 				c.documentation = typedefDocs(td)
 				c.kind = CompletionItemKind.Interface
 				c.sortText = FIELD_SORT
-				res.push(c)
+				addCompletionItem(res, c)
 			}
 		}
 	}
-	return res.length > 0 ? res : getGlobalCompletion(fileData.completionItems)
+	var items : CompletionItem[] = []
+	for (const m of res) {
+		items.push(...m.values())
+	}
+	return items.length > 0 ? items : getGlobalCompletion(fileData.completionItems)
 })
 
 connection.onHover(async (textDocumentPosition) => {
@@ -1680,12 +1686,6 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				if (found)
 					continue
 			}
-			addCompletionItem(map, {
-				label: f.name,
-				kind: CompletionItemKind.Function,
-				detail: funcDetail(f),
-				documentation: funcDocs(f),
-			})
 			addMod(f.mod, f)
 			if (f._uri == uri)
 				addUsedModule(f.origMod)
@@ -1902,6 +1902,27 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 
 			prevToken = token
+		}
+
+		for (const f of fixedResults.completion.functions) {
+			if (f.name.startsWith('builtin`')) {
+				f.name = f.name.substring(8)
+			}
+			else {
+
+				let prefixIdx = f.name.indexOf('`')
+				if (prefixIdx >= 0) {
+					if (prefixIdx == 0 || usedModules.has(f.name.substring(0, prefixIdx)))
+						f.name = f.name.substring(prefixIdx + 1)
+				}
+			}
+
+			addCompletionItem(map, {
+				label: f.name,
+				kind: CompletionItemKind.Function,
+				detail: funcDetail(f),
+				documentation: funcDocs(f),
+			})
 		}
 
 		var allReq = new Map<string, { origin: ModuleRequirement, depth: number }>()
