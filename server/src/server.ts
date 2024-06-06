@@ -11,6 +11,7 @@ import {
 	InlayHint, InlayHintKind,
 	LSPAny,
 	Location,
+	MarkupContent,
 	Position,
 	ProposedFeatures,
 	Range,
@@ -30,11 +31,12 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, moduleTdk, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, CompletionResult, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findStruct, findTypeDecl, findTypeDef, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, moduleTdk, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
 import os = require('os')
+import { get } from 'http'
 
 enum DiagnosticsActionType {
 	UnusedReq = 0,
@@ -449,6 +451,8 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 		return
 	}
 
+	const globalCompletion = getGlobalCompletion()
+
 	let prevTdks: Set<string>
 	let prevBrackets: Brackets = Brackets.None
 	let prevDelimiter: Delimiter = Delimiter.None
@@ -496,17 +500,17 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 		if (prevTdks && prevTdks.size > 0) {
 			// resolve tdk for type decls
 			for (const prevTdk of prevTdks) {
-				let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === prevTdk)
+				let typeDeclData = findTypeDecl(prevTdk, fileData.completion, globalCompletion)
 				if (typeDeclData != null) {
 					var next: CompletionItem[] = []
 					if (call.obj.length == 0 && call.brackets == Brackets.Square) {
-						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, next)
+						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, next)
 						if (nextTdk.tdk != prevTdk) {
 							call.tdks.add(nextTdk.tdk)
 						}
 					}
 					if (call.obj.length > 0) {
-						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, prevDelimiter, prevBrackets, next)
+						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, prevDelimiter, prevBrackets, next)
 						if (call.obj.length > 0) {
 							for (const it of next) {
 								if (it.label == call.obj) {
@@ -529,29 +533,39 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 			if (call.delimiter == Delimiter.Space) {
 				// maybe enum
 				let found = false
-				for (const en of fileData.completion.enums) {
+				let enumCb = (en) => {
 					if (en.name === call.obj && en.tdk.length > 0) {
-						call.tdks.add(en.tdk)
-						found = true
+						call.tdks.add(en.tdk);
+						found = true;
 					}
 				}
+				fileData.completion.enums.forEach(enumCb)
+				if (globalCompletion)
+					globalCompletion.enums.forEach(enumCb)
 				// or alias
-				for (const td of fileData.completion.typeDefs) {
-					if (td.name == call.obj && td.tdk.length > 0) {
-						call.tdks.add(td.tdk)
-						found = true
+				let aliasCb = (td) => {
+					if (td.name === call.obj && td.tdk.length > 0) {
+						call.tdks.add(td.tdk);
+						found = true;
 					}
 				}
+				fileData.completion.typeDefs.forEach(aliasCb)
+				if (globalCompletion)
+					globalCompletion.typeDefs.forEach(aliasCb)
+
 				prevTdks = call.tdks
 				if (found)
 					continue
 			}
 			else if (call.brackets == Brackets.Round) {
-				for (const fn of fileData.completion.functions) {
-					if (fn.name == call.obj && fn.tdk.length > 0) {
-						call.tdks.add(fn.tdk)
+				let fnCb = (fn) => {
+					if (fn.name === call.obj && fn.tdk.length > 0) {
+						call.tdks.add(fn.tdk);
 					}
 				}
+				fileData.completion.functions.forEach(fnCb)
+				if (globalCompletion)
+					globalCompletion.functions.forEach(fnCb)
 				if (call.tdks.size > 0) {
 					prevTdks = call.tdks
 					continue
@@ -674,121 +688,148 @@ const OPERATOR_REMAP: Map<string, string> = new Map([
 	['?[]', '?['],
 ])
 
-function getGlobalCompletion(base: CompletionItem[] = null): CompletionItem[] {
-	if (base?.length > 0)
-		return base
+function getGlobalCompletion(): CompletionResult {
 	const globs = validatingResults.get(globalCompletionFile.uri)
-	return globs ? globs.completionItems : []
+	return globs ? globs.completion : null
+}
+
+function getGlobalCompletionItems(): CompletionItem[] {
+	const globs = validatingResults.get(globalCompletionFile.uri)
+	return globs ? globs.completionItems : null
 }
 
 connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	if (!doc)
-		return getGlobalCompletion()
+		return getGlobalCompletionItems()
 	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
-		return getGlobalCompletion()
+		return getGlobalCompletionItems()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
-	if (callChain.length === 0)
-		return getGlobalCompletion(fileData.completionItems)
-
 	const res = new Array<Map<string, CompletionItem>>()
-	const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
-	const replaceStart = call.objRange.end
-	for (let completionTdk of call.tdks) {
-		let actualTdk = completionTdk
-		let typeDeclData = fileData.completion.typeDecls.find(td => td.tdk === completionTdk)
-		const items: CompletionItem[] = []
-		if (typeDeclData != null) {
-			let resTd = typeDeclCompletion(typeDeclData, fileData.completion, call.delimiter, call.brackets, items)
-			if (resTd.tdk.length > 0)
-				actualTdk = resTd.tdk
+	if (callChain.length > 0) {
+		const globalCompletion = getGlobalCompletion()
+		const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
+		const replaceStart = call.objRange.end
+		for (let completionTdk of call.tdks) {
+			let actualTdk = completionTdk
+			let typeDeclData = findTypeDecl(completionTdk, fileData.completion, globalCompletion)
+			const items: CompletionItem[] = []
+			if (typeDeclData != null) {
+				let resTd = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, items)
+				if (resTd.tdk.length > 0)
+					actualTdk = resTd.tdk
 
-			for (let it of items) {
-				fixCompletionSelf(it, replaceStart, textDocumentPosition.position)
-				addCompletionItem(res, it)
+				for (let it of items) {
+					fixCompletionSelf(it, replaceStart, textDocumentPosition.position)
+					addCompletionItem(res, it)
+				}
 			}
-		}
 
-		if ((call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
-			const tdks = [completionTdk]
-			if (actualTdk != completionTdk)
-				tdks.push(actualTdk)
+			if ((call.delimiter == Delimiter.Dot || call.delimiter == Delimiter.Pipe)) {
+				const tdks = [completionTdk]
+				if (actualTdk != completionTdk)
+					tdks.push(actualTdk)
 
-			for (const tdk of tdks) {
-				// fill extension functions
-				for (const fn of fileData.completion.functions) {
-					if (fn.isClassMethod)
-						continue
-					if (fn.name.startsWith(PROPERTY_PREFIX))
-						continue
-					// TODO: ignore const cases: Foo const == Foo
-					if (fn.args.length > 0 && fn.args[0].tdk === tdk) {
-						const propertyName = fixPropertyName(fn.name)
-						const isProperty = propertyName != null
-						const isOperator = !isProperty && OPERATORS.includes(fn.name)
-						const c = CompletionItem.create(isProperty ? propertyName : fn.name)
-						c.detail = funcDetail(fn)
-						c.documentation = funcDocs(fn)
-						c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function
-						const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`
-						fixCompletion(c, newText, replaceStart, textDocumentPosition.position)
-						c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT
-						const prev = items.find(it => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation)
-						if (prev == null)
-							addCompletionItem(res, c)
+				for (const tdk of tdks) {
+					// fill extension functions
+					const extFn = (fn) => {
+						if (fn.isClassMethod) {
+							return;
+						}
+						if (fn.name.startsWith(PROPERTY_PREFIX)) {
+							return;
+						}
+						// TODO: ignore const cases: Foo const == Foo
+						if (fn.args.length > 0 && fn.args[0].tdk === tdk) {
+							const propertyName = fixPropertyName(fn.name);
+							const isProperty = propertyName != null;
+							const isOperator = !isProperty && OPERATORS.includes(fn.name);
+							const c = CompletionItem.create(isProperty ? propertyName : fn.name);
+							c.detail = funcDetail(fn);
+							c.documentation = funcDocs(fn);
+							c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function;
+							const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`;
+							fixCompletion(c, newText, replaceStart, textDocumentPosition.position);
+							c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT;
+							const prev = items.find((it) => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation);
+							if (prev == null) {
+								addCompletionItem(res, c);
+							}
+						}
 					}
+					fileData.completion.functions.forEach(extFn)
+					if (globalCompletion)
+						globalCompletion.functions.forEach(extFn)
 				}
 			}
 		}
+		if (call.delimiter == Delimiter.ColonColon && call.obj.length > 0) {
+			let enumCb = (en) => {
+				if (en.mod == call.obj) {
+					const c = CompletionItem.create(en.name)
+					c.detail = enumDetail(en)
+					c.documentation = enumDocs(en)
+					c.kind = CompletionItemKind.Enum
+					c.sortText = FIELD_SORT
+					addCompletionItem(res, c)
+				}
+			}
+			fileData.completion.enums.forEach(enumCb)
+			if (globalCompletion)
+				globalCompletion.enums.forEach(enumCb)
+
+			let structCb = (st) => {
+				if (st.mod === call.obj) {
+					const c = CompletionItem.create(st.name)
+					c.detail = structDetail(st)
+					c.documentation = structDocs(st)
+					c.kind = CompletionItemKind.Struct
+					c.sortText = FIELD_SORT
+					addCompletionItem(res, c)
+				}
+			}
+			fileData.completion.structs.forEach(structCb)
+			if (globalCompletion)
+				globalCompletion.structs.forEach(structCb)
+
+			let fnCb = (fn) => {
+				if (fn.mod == call.obj) {
+					const c = CompletionItem.create(fn.name)
+					c.detail = funcDetail(fn)
+					c.documentation = funcDocs(fn)
+					c.kind = CompletionItemKind.Function
+					c.sortText = FIELD_SORT
+					addCompletionItem(res, c)
+				}
+			}
+			fileData.completion.functions.forEach(fnCb)
+			if (globalCompletion)
+				globalCompletion.functions.forEach(fnCb)
+
+			let tdCb = td => {
+				if (td.mod == call.obj) {
+					const c = CompletionItem.create(td.name)
+					c.detail = typedefDetail(td)
+					c.documentation = typedefDocs(td)
+					c.kind = CompletionItemKind.Interface
+					c.sortText = FIELD_SORT
+					addCompletionItem(res, c)
+				}
+			}
+			fileData.completion.typeDefs.forEach(tdCb)
+			if (globalCompletion)
+				globalCompletion.typeDefs.forEach(tdCb)
+		}
 	}
-	if (call.delimiter == Delimiter.ColonColon && call.obj.length > 0) {
-		for (const en of fileData.completion.enums) {
-			if (en.mod == call.obj) {
-				const c = CompletionItem.create(en.name)
-				c.detail = enumDetail(en)
-				c.documentation = enumDocs(en)
-				c.kind = CompletionItemKind.Enum
-				c.sortText = FIELD_SORT
-				addCompletionItem(res, c)
-			}
+	if (res.length > 0) {
+		var items: CompletionItem[] = []
+		for (const m of res) {
+			items.push(...m.values())
 		}
-		for (const st of fileData.completion.structs) {
-			if (st.mod === call.obj) {
-				const c = CompletionItem.create(st.name)
-				c.detail = structDetail(st)
-				c.documentation = structDocs(st)
-				c.kind = CompletionItemKind.Struct
-				c.sortText = FIELD_SORT
-				addCompletionItem(res, c)
-			}
-		}
-		for (const fn of fileData.completion.functions) {
-			if (fn.mod == call.obj) {
-				const c = CompletionItem.create(fn.name)
-				c.detail = funcDetail(fn)
-				c.documentation = funcDocs(fn)
-				c.kind = CompletionItemKind.Function
-				c.sortText = FIELD_SORT
-				addCompletionItem(res, c)
-			}
-		}
-		for (const td of fileData.completion.typeDefs) {
-			if (td.mod == call.obj) {
-				const c = CompletionItem.create(td.name)
-				c.detail = typedefDetail(td)
-				c.documentation = typedefDocs(td)
-				c.kind = CompletionItemKind.Interface
-				c.sortText = FIELD_SORT
-				addCompletionItem(res, c)
-			}
-		}
+		return items
 	}
-	var items : CompletionItem[] = []
-	for (const m of res) {
-		items.push(...m.values())
-	}
-	return items.length > 0 ? items : getGlobalCompletion(fileData.completionItems)
+	return fileData.completionItems
 })
 
 connection.onHover(async (textDocumentPosition) => {
@@ -804,6 +845,7 @@ connection.onHover(async (textDocumentPosition) => {
 	// console.log(JSON.stringify(callChain))
 	const last = callChain[callChain.length - 1]
 	const settings = await getDocumentSettings(textDocumentPosition.textDocument.uri)
+	let globalCompletion = getGlobalCompletion()
 	let res = ''
 	let first = true
 	for (const tok of last.tokens) {
@@ -811,7 +853,7 @@ connection.onHover(async (textDocumentPosition) => {
 		if (!first)
 			res += '\n'
 		first = false
-		res += describeToken(tok, fileData.completion)
+		res += describeToken(tok, fileData.completion, globalCompletion)
 
 		const func = fileData.completion.functions.find(f => f.name === tok.name && f.mod === tok.mod)
 		if (func != null && func.cpp.length > 0)
@@ -822,8 +864,8 @@ connection.onHover(async (textDocumentPosition) => {
 			if (tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
 				for (const td of fileData.completion.typeDecls) {
 					if (td.tdk === tok.tdk) {
-						if (!primitiveBaseType(td, fileData.completion)) {
-							const doc = typeDeclDocs(td, fileData.completion)
+						if (!primitiveBaseType(td, fileData.completion, globalCompletion)) {
+							const doc = typeDeclDocs(td, fileData.completion, globalCompletion)
 							if (doc.length > 0)
 								res += `\n\n${doc}`
 						}
@@ -860,17 +902,15 @@ connection.onHover(async (textDocumentPosition) => {
 	}
 	if (res.length == 0) {
 		for (const tdk of last.tdks) {
-			for (const td of fileData.completion.typeDecls) {
-				if (td.tdk === tdk) {
-					if (!first)
-						res += '\n'
-					first = false
-					res += `${last.obj} : ${typeDeclDetail(td)}`
-					if (!primitiveBaseType(td, fileData.completion)) {
-						const doc = typeDeclDocs(td, fileData.completion)
-						res += `\n${doc}`
-					}
-					break
+			const td = findTypeDecl(tdk, fileData.completion, globalCompletion)
+			if (td) {
+				if (!first)
+					res += '\n'
+				first = false
+				res += `${last.obj} : ${typeDeclDetail(td)}`
+				if (!primitiveBaseType(td, fileData.completion, globalCompletion)) {
+					const doc = typeDeclDocs(td, fileData.completion, globalCompletion)
+					res += `\n${doc}`
 				}
 			}
 		}
@@ -906,15 +946,14 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 		return null
 	const last = callChain[callChain.length - 1]
 	let res: Location[] = []
+	const globalCompletion = getGlobalCompletion()
 
 	const resTdks = last.tdks
 	for (const resTdk of resTdks) {
-		for (const td of fileData.completion.typeDecls) {
-			if (td.tdk === resTdk) {
-				const pos = typeDeclDefinition(td, fileData.completion)
-				addValidLocation(res, pos)
-				break
-			}
+		const td = findTypeDecl(resTdk, fileData.completion, globalCompletion)
+		if (td) {
+			const pos = typeDeclDefinition(td, fileData.completion, globalCompletion)
+			addValidLocation(res, pos)
 		}
 	}
 
@@ -922,8 +961,8 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	for (const resAlias of resAliases) {
 		if (resAlias.name.length === 0)
 			continue
-		const tf = fileData.completion.typeDefs.find(td => td.name === resAlias.name && td.mod === resAlias.mod)
-		if (tf != null) {
+		const tf = findTypeDef(resAlias.name, resAlias.mod, fileData.completion, globalCompletion)
+		if (tf) {
 			addValidLocation(res, tf)
 		}
 	}
@@ -931,9 +970,9 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	for (const tok of last.tokens) {
 		if (tok.kind == TokenKind.Struct || tok.kind == TokenKind.Handle) {
 			// it's fast :)
-			const st = fileData.completion.structs.find(st => st.name === tok.name && st.mod === tok.mod)
+			const st = findStruct(tok.name, tok.mod, fileData.completion, globalCompletion)
 			if (st != null) {
-				const st2 = getParentStruct(st, fileData.completion)
+				const st2 = getParentStruct(st, fileData.completion, globalCompletion)
 				addValidLocation(res, st2)
 			}
 		}
@@ -991,11 +1030,12 @@ connection.onDefinition(async (declarationParams) => {
 	if (last.tokens.length === 0 && last.delimiter != Delimiter.Pipe && last.delimiter != Delimiter.ColonColon) {
 		const prev = callChain.length > 1 ? callChain[callChain.length - 2] : null
 		if (prev) {
+			let globalCompletion = getGlobalCompletion()
 			for (const tdk of prev.tdks) {
-				const typeDecl = fileData.completion.typeDecls.find(td => td.tdk === tdk)
+				const typeDecl = findTypeDecl(tdk, fileData.completion, globalCompletion)
 				if (typeDecl) {
 					// TODO: find pos for field tdk.name
-					const pos = typeDeclDefinition(typeDecl, fileData.completion)
+					const pos = typeDeclDefinition(typeDecl, fileData.completion, globalCompletion)
 					addValidLocation(res, pos)
 				}
 			}
@@ -1009,6 +1049,7 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 	const fileData = await getDocumentData(documentSymbolParams.textDocument.uri)
 	if (!fileData)
 		return null
+	const globalCompletion = getGlobalCompletion()
 	const res: DocumentSymbol[] = []
 	for (const glob of fileData.completion.globals) {
 		if (glob._uri != documentSymbolParams.textDocument.uri)
@@ -1084,7 +1125,7 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 			children: [],
 		}
 		res.push(tdRes)
-		const ctd = fileData.completion.typeDecls.find(it => it.tdk === td.tdk)
+		const ctd = findTypeDecl(td.tdk, fileData.completion, globalCompletion)
 		if (ctd != null) {
 			for (const f of ctd.fields) {
 				tdRes.children.push({
@@ -1483,7 +1524,29 @@ function addCompletionItem(map: Array<Map<string, CompletionItem>>, item: Comple
 	const items = map[item.kind]
 	const it = items.get(item.label)
 	if (it != null) {
-		it.documentation += '\n\n' + item.documentation
+		if (item.documentation) {
+			let wasDoc = it.documentation
+			let newDoc = item.documentation
+			if (typeof wasDoc != 'string') {
+				wasDoc = wasDoc.value
+			}
+			if (typeof newDoc != 'string') {
+				newDoc = newDoc.value
+			}
+			if (wasDoc != newDoc) {
+				if (typeof item.documentation != 'string') {
+					let prefixLen = '```dascript\n'.length
+					newDoc = newDoc.substring(prefixLen, newDoc.length - 3)
+				}
+				if (typeof it.documentation == 'string') {
+					it.documentation += '\n\n' + newDoc
+				}
+				else {
+					let mk = it.documentation as MarkupContent
+					mk.value = mk.value.substring(0, mk.value.length - 3) + '\n\n' + newDoc + '\n```'
+				}
+			}
+		}
 		return
 	}
 	items.set(item.label, item)
@@ -1500,7 +1563,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 	const uri = doc.uri
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
-	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map() }
+	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map(), }
 	if (res.errors.length > 0) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
@@ -1511,31 +1574,22 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 	}
 	else {
-		if (uri != globalCompletionFile.uri) {
-			const globs = validatingResults.get(globalCompletionFile.uri)
-			if (globs) {
-				console.log('>>> merge global completion')
-				fixedResults.completion.structs.unshift(...globs.completion.structs)
-				fixedResults.completion.enums.unshift(...globs.completion.enums)
-				fixedResults.completion.typeDecls.unshift(...globs.completion.typeDecls)
-				fixedResults.completion.typeDefs.unshift(...globs.completion.typeDefs)
-				fixedResults.completion.globals.unshift(...globs.completion.globals)
-				fixedResults.completion.functions.unshift(...globs.completion.functions)
-			}
-		}
+		let globalCompletionRes = uri != globalCompletionFile.uri ? validatingResults.get(globalCompletionFile.uri) : null
+		let globalCompletion = globalCompletionRes ? globalCompletionRes.completion : null
+
 		const modules = new Set<string>()
 		var usedModules: Set<string> = new Set()
 		function addUsedModule(mod: string) {
 			if (mod.length > 0)
 				usedModules.add(mod)
 		}
-		const map = new Array<Map<string, CompletionItem>>()
+		const completionMap = new Array<Map<string, CompletionItem>>()
 		function addMod(name: string, at: CompletionAt) {
 			if (name?.length == 0)
 				return
 			if (!modules.has(name)) {
 				modules.add(name)
-				addCompletionItem(map, {
+				addCompletionItem(completionMap, {
 					label: name,
 					kind: CompletionItemKind.Module,
 					detail: `module ${name}`,
@@ -1549,7 +1603,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)
 			e._uri = AtToUri(e, uri, settings, res.dasRoot, fixedResults.filesCache)
-			addCompletionItem(map, {
+			addCompletionItem(completionMap, {
 				label: e.name,
 				kind: CompletionItemKind.Enum,
 				detail: enumDetail(e),
@@ -1559,7 +1613,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			for (const ev of e.values) {
 				ev._range = AtToRange(ev)
 				ev._uri = AtToUri(ev, uri, settings, res.dasRoot, fixedResults.filesCache)
-				addCompletionItem(map, {
+				addCompletionItem(completionMap, {
 					label: ev.name,
 					kind: CompletionItemKind.EnumMember,
 					detail: enumValueDetail(ev),
@@ -1571,7 +1625,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			s.column++ // magic number to fix column
 			s._range = AtToRange(s)
 			s._uri = AtToUri(s, uri, settings, res.dasRoot, fixedResults.filesCache)
-			addCompletionItem(map, {
+			addCompletionItem(completionMap, {
 				label: s.name,
 				kind: s.isClass ? CompletionItemKind.Class : CompletionItemKind.Struct,
 				detail: structDetail(s),
@@ -1585,7 +1639,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				// sf.columnEnd += sf.tdk.length + 1 // 1 char for ':'
 				sf._range = AtToRange(sf)
 				sf._uri = AtToUri(sf, uri, settings, res.dasRoot, fixedResults.filesCache)
-				addCompletionItem(map, {
+				addCompletionItem(completionMap, {
 					label: sf.name,
 					kind: CompletionItemKind.Field,
 					detail: structFieldDetail(sf),
@@ -1596,14 +1650,14 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		for (const t of res.completion.typeDecls) {
 			t._range = AtToRange(t)
 			t._uri = AtToUri(t, uri, settings, res.dasRoot, fixedResults.filesCache)
-			addCompletionItem(map, {
+			addCompletionItem(completionMap, {
 				label: t.tdk,
 				kind: baseTypeToCompletionItemKind(t.baseType),
 				detail: typeDeclDetail(t),
-				documentation: typeDeclDocs(t, res.completion),
+				documentation: typeDeclDocs(t, res.completion, globalCompletion),
 			})
 			for (const tf of t.fields) {
-				addCompletionItem(map, {
+				addCompletionItem(completionMap, {
 					label: tf.name,
 					kind: CompletionItemKind.Field,
 					detail: typeDeclFieldDetail(tf),
@@ -1616,8 +1670,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		for (const t of res.completion.typeDefs) {
 			t._range = AtToRange(t)
 			t._uri = AtToUri(t, uri, settings, res.dasRoot, fixedResults.filesCache)
-			const valueType = res.completion.typeDecls.find(td => td.tdk === t.tdk)
-			addCompletionItem(map, {
+			const valueType = findTypeDecl(t.tdk, res.completion, globalCompletion)
+			addCompletionItem(completionMap, {
 				label: t.name,
 				kind: valueType != null ? baseTypeToCompletionItemKind(valueType.baseType) : CompletionItemKind.Struct,
 				detail: typedefDetail(t),
@@ -1628,7 +1682,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		for (const g of res.completion.globals) {
 			g._range = AtToRange(g)
 			g._uri = AtToUri(g, uri, settings, res.dasRoot, fixedResults.filesCache)
-			addCompletionItem(map, {
+			addCompletionItem(completionMap, {
 				label: g.name,
 				kind: CompletionItemKind.Variable,
 				detail: globalDetail(g),
@@ -1643,9 +1697,9 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot, fixedResults.filesCache)
 			if ((f.args.length == 1 || f.args.length == 2) && f.name.startsWith(PROPERTY_PREFIX)) {
 				let found = false
-				const td = res.completion.typeDecls.find(td => td.tdk === f.args[0].tdk)
+				const td = findTypeDecl(f.args[0].tdk, res.completion, globalCompletion)
 				if (td) {
-					typeDeclIter(td, res.completion, (td, st, en) => {
+					typeDeclIter(td, res.completion, globalCompletion, (td, st, en) => {
 						if (st) {
 							found = true
 							let name = f.name.substring(2)
@@ -1692,7 +1746,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			for (const arg of f.args) {
 				arg._range = AtToRange(arg)
 				arg._uri = AtToUri(arg, uri, settings, res.dasRoot, fixedResults.filesCache)
-				addCompletionItem(map, {
+				addCompletionItem(completionMap, {
 					label: arg.name,
 					kind: CompletionItemKind.Variable,
 					detail: funcArgDetail(arg),
@@ -1749,12 +1803,12 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 			fixedResults.tokens.push(token)
 			// TODO: add completion items for tokens
-			if (token.kind == TokenKind.ExprVar) {
-				addCompletionItem(map, {
+			if (token.kind == TokenKind.ExprLet) {
+				addCompletionItem(completionMap, {
 					label: token.name,
 					kind: CompletionItemKind.Variable,
 					detail: token.name,
-					documentation: describeToken(token, fixedResults.completion),
+					documentation: describeToken(token, res.completion, globalCompletion),
 				})
 			}
 
@@ -1762,7 +1816,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				// moved to validate_file.das
 				// if (token.kind == TokenKind.ExprAddr) {
 				// 	// function call
-				// 	const func = fixedResults.completion.functions.find(f => f.name === token.name && f.mod === token.mod)
+				// 	const func = mergedCompletion.functions.find(f => f.name === token.name && f.mod === token.mod)
 				// 	if (func) {
 				// 		token.declAt = func
 				// 		addUsedModule(token.mod)
@@ -1770,16 +1824,16 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				// }
 				if (token.kind == TokenKind.Typedecl) {
 					if (!isRangeLengthZero(token._range)) {
-						const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+						const td = findTypeDecl(token.tdk, res.completion, globalCompletion)
 						if (td != null) {
 							addUsedModule(td.mod)
-							const td2 = typeDeclDefinition(td, fixedResults.completion)
+							const td2 = typeDeclDefinition(td, res.completion, globalCompletion)
 							if (td2 != null) {
 								token.declAt = td2
 							}
 						}
 						if (isRangeZeroEmpty(token.declAt._range) && token.alias.length > 0) {
-							const td = fixedResults.completion.typeDefs.find(td => td.name === token.alias && td.mod === token.mod)
+							const td = findTypeDef(token.alias, token.mod, res.completion, globalCompletion)
 							if (td != null) {
 								addUsedModule(td.mod)
 								token.declAt = td
@@ -1788,16 +1842,16 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					}
 				}
 				else if (token.kind == TokenKind.Struct || token.kind == TokenKind.Handle) {
-					const st = fixedResults.completion.structs.find(st => st.name === token.name && st.mod === token.mod)
+					const st = findStruct(token.name, token.mod, res.completion, globalCompletion)
 					if (st) {
 						addUsedModule(st.mod)
 						token.declAt = st
 					}
 				}
 				else if (token.kind == TokenKind.ExprConstEnumeration) {
-					const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+					const td = findTypeDecl(token.tdk, res.completion, globalCompletion)
 					if (td && td.enumName.length > 0) {
-						const en = fixedResults.completion.enums.find(en => en.name === td.enumName && en.mod === td.mod)
+						const en = findEnum(td.enumName, td.mod, res.completion, globalCompletion)
 						if (en) {
 							addUsedModule(en.mod)
 							for (const ev of en.values) {
@@ -1815,14 +1869,14 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 			// if (isRangeZeroEmpty(token.declAt._range) && token.kind != TokenKind.Func && token.kind != TokenKind.ExprDebug) {
 			// 	if (token.tdk.length > 0) {
-			// 		const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+			// 		const td = mergedCompletion.typeDecls.find(td => td.tdk === token.tdk)
 			// 		token.declAt = td
 			// 	}
 			// }
 			if (isRangeZeroEmpty(token.declAt._range) && token.parentTdk.length > 0) {
-				const parentTypeDecl = fixedResults.completion.typeDecls.find(td => td.tdk === token.parentTdk)
+				const parentTypeDecl = findTypeDecl(token.parentTdk, res.completion, globalCompletion)
 				if (parentTypeDecl) {
-					typeDeclIter(parentTypeDecl, fixedResults.completion, (td, st, en, tf) => {
+					typeDeclIter(parentTypeDecl, res.completion, globalCompletion, (td, st, en, tf) => {
 						if (st) {
 							addUsedModule(st.mod)
 							const field = st.fields.find(f => f.name === token.name)
@@ -1841,7 +1895,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 
 				}
 				if (isRangeZeroEmpty(token.declAt._range))
-					token.declAt = typeDeclDefinition(parentTypeDecl, fixedResults.completion)
+					token.declAt = typeDeclDefinition(parentTypeDecl, res.completion, globalCompletion)
 			}
 
 			for (const token of fixedResults.tokens) {
@@ -1895,7 +1949,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 			//fallback to type decl
 			if (token.kind != TokenKind.Func && token.kind != TokenKind.ExprDebug && token.kind != TokenKind.ExprAddr && token.tdk.length > 0) {
-				const td = fixedResults.completion.typeDecls.find(td => td.tdk === token.tdk)
+				const td = findTypeDecl(token.tdk, res.completion, globalCompletion)
 				if (td) {
 					addUsedModule(td.mod)
 				}
@@ -1917,7 +1971,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				}
 			}
 
-			addCompletionItem(map, {
+			addCompletionItem(completionMap, {
 				label: f.name,
 				kind: CompletionItemKind.Function,
 				detail: funcDetail(f),
@@ -2004,12 +2058,88 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			}
 		}
 
-		for (const [_, items] of map.entries()) {
+		if (uri == globalCompletionFile.uri) {
+			// add global completion items
+			// src\parser\ds_parser.ypp:143
+			const keywords = ["struct", "class", "let", "def", "while", "if", "static_if", "else", "for", "recover", "true", "false", "new",
+				"typeinfo", "type", "in", "is", "as", "elif", "static_elif", "array", "return", "null", "break", "try", "options",
+				"table", "expect", "const", "require", "operator", "enum", "finally", "delete", "deref", "typedef", "with", "aka", "assume",
+				"cast", "override", "abstract", "upcast", "iterator", "var", "addr", "continue", "where", "pass", "reinterpret",
+				"module", "public", "label", "goto", "implicit", "explicit", "shared", "private", "smart_ptr", "unsafe", "inscope", "static"]
+
+			for (const kw of keywords) {
+				addCompletionItem(completionMap, {
+					label: kw,
+					kind: CompletionItemKind.Keyword,
+					// detail: kw,
+					documentation: `keyword ${kw}`
+				})
+			}
+
+			const basicTypes = ["bool", "void", "string", "auto", "int", "int2", "int3", "int4", "uint", "bitfield", "uint2",
+				"uint3", "uint4", "float", "float2", "float3", "float4", "range", "urange", "range64", "urange64", "block", "int64",
+				"uint64", "double", "function", "lambda", "int8", "uint8", "int16", "uint16", "tuple", "variant", "generator", "yield", "sealed"]
+
+			for (const bt of basicTypes) {
+				addCompletionItem(completionMap, {
+					label: bt,
+					kind: CompletionItemKind.Class,
+					documentation: `type ${bt}`
+				})
+			}
+
+			const metaCalls: Map<string, string[]> = new Map()
+			metaCalls.set('assert', ["def assert(cond)", "def assert(cond, string)"])
+			metaCalls.set('verify', ["def verify(cond)", "def verify(cond, string)"])
+			metaCalls.set('static_assert', ["def static_assert(cond)", "def static_assert(cond, string)"])
+			metaCalls.set('concept_assert', ["def concept_assert(cond)", "def concept_assert(cond, string)"])
+			metaCalls.set('debug', ["def debug(value : auto(T)) : T", "def debug(value : auto(T), string) : T"])
+			metaCalls.set('memzero', ["def memzero(ref)"])
+
+			for (const [name, descriptions] of metaCalls.entries()) {
+				for (const desc of descriptions) {
+					addCompletionItem(completionMap, {
+						label: name,
+						kind: CompletionItemKind.Function,
+						documentation: desc,
+					})
+				}
+			}
+
+			// src\ast\ast_lint.cpp:759
+			const options = ["lint", "only_fast_aot", "aot_order_side_effects", "no_global_heap", "no_global_variables",
+				"no_global_variables_at_all", "no_unused_function_arguments", "no_unused_block_arguments", "no_deprecated", "no_aliasing",
+				"strict_smart_pointers", "no_init", "no_local_class_members", "report_invisible_functions", "report_private_functions", "stack",
+				"intern_strings", "multiple_contexts", "persistent_heap", "heap_size_hint", "heap_size_limit", "string_heap_size_hint",
+				"string_heap_size_limit", "gc", "solid_context", "no_aot", "aot_prologue", "log", "log_optimization_passes", "log_optimization",
+				"log_stack", "log_init", "log_symbol_use", "log_var_scope", "log_nodes", "log_nodes_aot_hash", "log_mem", "log_debug_mem", "log_cpp",
+				"log_aot", "log_infer_passes", "log_require", "log_compile_time", "log_total_compile_time", "log_generics", "log_mn_hash",
+				"log_gmn_hash", "log_ad_hash", "log_aliasing", "print_ref", "print_var_access", "print_c_style", "print_func_use", "rtti",
+				"optimize", "fusion", "remove_unused_symbols", "always_export_initializer", "infer_time_folding", "disable_run", "max_infer_passes",
+				"indenting", "debugger", "profiler", "skip_lock_checks", "skip_module_lock_checks", "threadlock_context"]
+
+			for (const opt of options) {
+				addCompletionItem(completionMap, {
+					label: `options ${opt}`,
+					kind: CompletionItemKind.Keyword,
+					documentation: `options ${opt}`
+				})
+			}
+		}
+
+		if (globalCompletionRes) {
+			// very stupid way to merge global completion with local completion
+			// but only this way we can keep all the items in the correct order
+			for (const it of globalCompletionRes.completionItems) {
+				addCompletionItem(completionMap, it)
+			}
+		}
+
+		for (const [_, items] of completionMap.entries()) {
 			fixedResults.completionItems.push(...items.values())
 		}
 		for (const item of fixedResults.completionItems) {
-			// settings.experimental
-			if (item.detail.length > 0) {
+			if (item.documentation) {
 				item.documentation = {
 					kind: 'markdown',
 					value: '```dascript\n' + item.documentation + '\n```'
