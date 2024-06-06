@@ -582,14 +582,12 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
     const qDotDel = delimiter == Delimiter.QuestionDot
     const spaceDel = delimiter == Delimiter.Space
     if ((td.baseType === BaseType.tStructure || td.baseType === BaseType.tHandle) && td.dim.length == 0 && brackets != Brackets.Square && brackets != Brackets.QuestionSquare) {
-        const st = cr.structs.find(s => s.name === td.structName && s.mod === td.mod)
+        const st = findStruct(td.structName, td.mod, cr, cr2)
         if (st) {
             const onlyFunctions = delimiter == Delimiter.Arrow
             if (onlyFunctions || dotDel || qDotDel)
                 st.fields.forEach(f => {
-                    let td = cr.typeDecls.find(t => t.tdk === f.tdk)
-                    if (!td && cr2)
-                        td = cr2.typeDecls.find(t => t.tdk === f.tdk)
+                    const td = findTypeDecl(f.tdk, cr, cr2)
                     const isFunction = !f._property && td && td.baseType === BaseType.tFunction
                     if (onlyFunctions && !isFunction)
                         return
@@ -630,7 +628,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
     if (td.alias.length > 0) {
         const td1 = findTypeDef(td.alias, td.mod, cr, cr2)
         if (td1) {
-            const td2 = cr.typeDecls.find(t => t.tdk === td1.tdk)
+            const td2 = findTypeDecl(td1.tdk, cr, cr2)
             if (td2 && td2 != td)
                 resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
             // else
@@ -716,7 +714,6 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
             c.kind = CompletionItemKind.Keyword
             c.insertText = ' |> invoke('
             addUniqueCompletionItem(res, c)
-
         }
     }
     if (delimiter == Delimiter.Is) {
@@ -726,7 +723,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
     }
     let searchOperatorName = brackets == Brackets.Square ? '[]' : brackets == Brackets.QuestionSquare ? '?[]' : ''
     if (searchOperatorName.length > 0) {
-        for (const fn of cr.functions) {
+        let fnCb = fn => {
             if (fn.args.length > 0 && fn.name == searchOperatorName && fn.args[0].tdk === td.tdk) {
                 const td2 = findTypeDecl(fn.tdk, cr, cr2)
                 if (td2) {
@@ -734,12 +731,15 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                 }
             }
         }
+        cr.functions.forEach(fnCb)
+        if (cr2)
+            cr2.functions.forEach(fnCb)
     } else {
         const propPrefix = PROPERTY_PREFIXES.filter(p => p[0] == delimiter)
         const propertyPrefixes = propPrefix.length > 0 ? propPrefix :
             (dotDel) ? PROPERTY_PREFIXES : []
         for (const propertyPrefix of propertyPrefixes) {
-            for (const fn of cr.functions) {
+            const fnCb = (fn: CompletionFunction): void => {
                 if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
                     const propertyName = fixPropertyName(fn.name)
                     const c = CompletionItem.create(propertyName)
@@ -752,21 +752,9 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                     addUniqueCompletionItem(res, c)
                 }
             }
-            if (cr2) {
-                for (const fn of cr2.functions) {
-                    if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
-                        const propertyName = fixPropertyName(fn.name)
-                        const c = CompletionItem.create(propertyName)
-                        c.kind = CompletionItemKind.Property
-                        c.detail = funcDetail(fn)
-                        c.documentation = funcDocs(fn)
-                        c.data = fn.tdk
-                        c.sortText = PROPERTY_SORT
-                        c.insertText = c.label
-                        addUniqueCompletionItem(res, c)
-                    }
-                }
-            }
+            cr.functions.forEach(fnCb)
+            if (cr2)
+                cr2.functions.forEach(fnCb)
         }
     }
 
