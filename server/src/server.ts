@@ -1139,7 +1139,7 @@ connection.onDocumentSymbol(async (documentSymbolParams) => {
 		}
 	}
 	for (const fn of fileData.completion.functions) {
-		if (fn.gen || fn.isClassMethod)
+		if (fn.gen)
 			continue
 		if (fn._uri != documentSymbolParams.textDocument.uri)
 			continue
