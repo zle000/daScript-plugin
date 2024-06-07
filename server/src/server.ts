@@ -2409,7 +2409,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			fixedResults.completionItems.push(...items.values())
 		}
 		for (const item of fixedResults.completionItems) {
-			if (item.documentation) {
+			if (typeof item.documentation === 'string') {
 				item.documentation = {
 					kind: 'markdown',
 					value: '```dascript\n' + item.documentation + '\n```'
