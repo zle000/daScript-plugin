@@ -25,6 +25,7 @@ import {
 	WorkDoneProgressBegin,
 	WorkDoneProgressReport,
 	WorkDoneProgressEnd,
+	DocumentUri,
 } from 'vscode-languageserver/node'
 
 import {
@@ -69,6 +70,20 @@ const serverCommandHandlers: {[k in string]: () => Promise<void>} = {
 	'cancelRevalidation': async () => await cancelRevalidation(),
 }
 
+
+function mangleFileUri(uri: DocumentUri, version?: number): string {
+	const filePath = URI.parse(uri).fsPath;
+
+	const uriHash = stringHashCode(uri).toString(16);
+	const versionHash = version?.toString(16);
+	const filename = path.basename(filePath);
+
+	return [
+		uriHash,
+		versionHash,
+		filename
+	].filter(p => !!p).join("_");
+}
 
 function debugWsFolders() {
 	return workspaceFolders ? workspaceFolders.map(f => f.name).join(', ') : ''
@@ -1112,6 +1127,8 @@ connection.onInitialized(async () => {
 			connection.console.log('Workspace folder change event received.')
 		})
 	}
+
+	revalidateWorkspace();
 })
 
 connection.onExecuteCommand(async (params) => {
@@ -1222,6 +1239,43 @@ async function cancelRevalidation(): Promise<void> {
 	validationCancelled = true;
 }
 
+function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
+	const diagnostics: Map<string, Diagnostic[]> = new Map();
+	
+	for (const error of result.errors) {
+		error._range = AtToRange(error)
+		error._uri = AtToUri(error, file, settings, result.dasRoot)
+		if (error._uri.length === 0)
+			error._uri = file
+
+		let msg = error.what.trim()
+		if (error.extra?.length > 0 || error.fixme?.length > 0) {
+			var suffix = ''
+			if (error.extra?.length > 0)
+				suffix += error.extra.trim()
+			if (error.fixme?.length > 0)
+				suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
+
+			msg = `${msg}\n\n${suffix}`
+		}
+		const diag: Diagnostic = {
+			range: error._range,
+			message: msg,
+			code: error.cerr,
+			severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+		}
+		if (!diagnostics.has(error._uri))
+			diagnostics.set(error._uri, [])
+		diagnostics.get(error._uri).push(diag)
+	}
+
+	for (const [uri, diags] of diagnostics.entries()) {
+		connection.sendDiagnostics({ uri: uri, diagnostics: diags })
+	}
+
+	return diagnostics;
+}
+
 async function validateWorkspaceFolder(dir: string): Promise<void> {
 	let foldersToVisit: string[] = [dir]
 	let validatingQueue: ValidatingQueue = new ValidatingQueue(5);
@@ -1272,31 +1326,40 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 		foldersToVisit.shift();
 	}
 
+	let fileContent: string;
 	for (const [file, i] of zip(filesToValidate, range(1, filesToValidate.length))) {
 		if (validationCancelled) {
 			return;
 		}
 
-		const fileParts = file.split("/")
-		const validationCacheFile = path.resolve('.dascript', ...fileParts.splice(0, -1), `${last(fileParts)}.json`)
+		const textDocument = TextDocument.create(
+			file,
+			"dascript",
+			1,
+			(await promisify(readFile)(file)).toString()
+		);
+		const validationCacheFile = path.resolve('.dascript', `${mangleFileUri(file)}.json`)
+		const settings = await getDocumentSettings(file);
 
 		try {
-			const res = (await promisify(fs.readFile)(validationCacheFile, {encoding : 'utf8'}));
-			try {
-				const cachedValidation = JSON.parse(
-					res
-				);
-				console.log(`Found validation cache file, ${validationCacheFile}`);
-				validatingResults[file] = cachedValidation;
+			fileContent = (await promisify(fs.readFile)(validationCacheFile, {encoding : 'utf8'}));
+			const result = JSON.parse(fileContent) as ValidationResult;
+			fileContent = ""
+			
+			console.log(`Found validation cache file, ${validationCacheFile}`);
+			
+			const diagnostics = sendDiagnostics(result, file, settings);
+			// storeValidationResult(settings, textDocument, result, diagnostics)
 
-				continue;
-			}
-			catch (err) {
-				console.log('Failed to parse', file);
-			}
+			continue;
 		}
 		catch (err) {
-			console.log(`Validation cache file not found, ${validationCacheFile}`);
+			if (err instanceof SyntaxError) {
+				console.log('Failed to parse', file);
+			}
+			else {
+				console.log(`Validation cache file not found, ${validationCacheFile}`);
+			}
 		}
 
 		await connection.sendNotification(
@@ -1313,14 +1376,7 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 
 		await validatingQueue.enqueue(
 			file,
-			async () => {
-				await validateTextDocument(TextDocument.create(
-					file,
-					"dascript",
-					1,
-					(await promisify(readFile)(file)).toString()
-				));
-			}
+			async () => await validateTextDocument(textDocument)
 		)
 	}
 
@@ -1506,11 +1562,10 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			console.time('storeValidationResult')
 			storeValidationResult(settings, textDocument, result, diagnostics)
 
-			let uriParts = textDocument.uri.split("/");
+			const filename = path.resolve('.dascript', `${mangleFileUri(textDocument.uri)}.json`)
 			try {
-				fs.mkdirSync(path.resolve(".dascript", ...uriParts.slice(0, -1)), {recursive: true});
 				fs.writeFileSync(
-					path.resolve('.dascript', ...uriParts.slice(0, -1), `${last(uriParts)}.json`),
+					filename,
 					validateTextResult,
 					{encoding: 'utf8'}
 				)
@@ -1562,14 +1617,13 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map() }
-	if (res.errors.length > 0) {
+	if (res.errors.length > 0 && validatingResults.has(uri)) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
-		if (prev) {
-			fixedResults.completion = prev.completion
-			fixedResults.completionItems = prev.completionItems
-			fixedResults.tokens = prev.tokens
-		}
+
+		fixedResults.completion = prev.completion
+		fixedResults.completionItems = prev.completionItems
+		fixedResults.tokens = prev.tokens
 	}
 	else {
 		if (uri != globalCompletionFile.uri) {
