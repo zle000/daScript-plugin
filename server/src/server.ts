@@ -62,6 +62,12 @@ let workspaceFolders: WorkspaceFolder[] | null
 let hasConfigurationCapability = false
 let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
+let validationCancelled = false;
+
+const serverCommandHandlers: {[k in string]: () => Promise<void>} = {
+    'revalidateWorkspace': async () => await revalidateWorkspace(),
+	'cancelRevalidation': async () => await cancelRevalidation(),
+}
 
 
 function debugWsFolders() {
@@ -1095,108 +1101,6 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	return res
 })
 
-async function validateWorkspaceFolder(dir: string): Promise<void> {
-	let foldersToVisit: string[] = [dir]
-	let validatingQueue: ValidatingQueue = new ValidatingQueue(5);
-	const ignoredFolders: string[] = [".git", ".github"]	
-	const token = `validation/${dir}`;
-
-	await connection.sendRequest("window/workDoneProgress/create", {
-		token,
-	});
-	await connection.sendNotification(
-		"$/progress",
-		{
-			token,
-			value: <WorkDoneProgressBegin>{
-				kind: "begin",
-				title: `Validation`,
-				message: "Collecting files to validate...",
-				percentage: 0,
-			}
-		}
-	);
-
-	let filesToValidate: string[] = [];
-	while (foldersToVisit.length !== 0) {
-		const files = await promisify(readdir)(foldersToVisit[0]);
-		const fileStats = await Promise.all(files
-			.map(file => promisify(stat)(join(foldersToVisit[0], file)))
-		)
-
-		for (let i = 0; i < files.length; i++) {
-			const path = join(foldersToVisit[0], files[i]);
-			const isIgnored: boolean = ignoredFolders
-				.filter(ignored => path.endsWith(ignored))
-				.length !== 0
-
-			if (isIgnored) {
-				continue;
-			}
-
-			if (fileStats[i].isDirectory()) {
-				foldersToVisit.push(path);
-			}
-			else if (path.endsWith(".das")) {
-				filesToValidate.push(path);
-			}
-		}
-
-		foldersToVisit.shift();
-	}
-
-	for (const [file, i] of zip(filesToValidate, range(1, filesToValidate.length))) {
-		if (validationCancelled) {
-			return;
-		}
-
-		const validationCacheFile = path.resolve('.dascript', `${last(file.split("/"))}.json`)
-
-		try {
-			const cachedValidation = JSON.parse(
-				(await promisify(fs.readFile)(validationCacheFile)).toString('utf-8')
-			);
-
-			console.log(`Found validation cache file, ${validationCacheFile}`);
-			validatingResults[file] = cachedValidation;
-
-			continue;
-		}
-		catch (err) {
-			console.log(`Validation cache file not found, ${validationCacheFile}`);
-		}
-
-		await connection.sendNotification(
-			"$/progress",
-			{
-				token,
-				value: <WorkDoneProgressReport>{
-					kind: "report",
-					message: `(${i}/${filesToValidate.length}) ${path.relative(dir, file)}`,
-					percentage: (i / filesToValidate.length) * 100,
-				}
-			}
-		);
-
-		await validatingQueue.enqueue(
-			file,
-			async () => {
-				await validateTextDocument(TextDocument.create(
-					file,
-					"dascript",
-					1,
-					(await promisify(readFile)(file)).toString()
-				));
-			}
-		)
-	}
-
-	await connection.sendNotification(
-		"$/progress",
-		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
-	);
-}
-
 connection.onInitialized(async () => {
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
@@ -1210,15 +1114,15 @@ connection.onInitialized(async () => {
 	}
 })
 
-let validationCancelled = false;
 connection.onExecuteCommand(async (params) => {
-	if (params.command == 'cancelValidation') {
-		validationCancelled = true;
+	if (!serverCommandHandlers[params.command]) {
 		return;
 	}
 
-	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
-		await validateWorkspaceFolder(folder);
+	serverCommandHandlers[params.command]();
+	if (params.command == 'cancelValidation') {
+		validationCancelled = true;
+		return;
 	}
 })
 
@@ -1306,6 +1210,124 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 			return validatingResults.get(uri)
 		})
 	})
+}
+
+async function revalidateWorkspace(): Promise<void> {
+	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+		await validateWorkspaceFolder(folder);
+	}
+}
+
+async function cancelRevalidation(): Promise<void> {
+	validationCancelled = true;
+}
+
+async function validateWorkspaceFolder(dir: string): Promise<void> {
+	let foldersToVisit: string[] = [dir]
+	let validatingQueue: ValidatingQueue = new ValidatingQueue(5);
+	const ignoredFolders: string[] = [".git", ".github"]	
+	const token = `validation/${dir}`;
+
+	await connection.sendRequest("window/workDoneProgress/create", {
+		token,
+	});
+	await connection.sendNotification(
+		"$/progress",
+		{
+			token,
+			value: <WorkDoneProgressBegin>{
+				kind: "begin",
+				title: `Validation`,
+				message: "Collecting files to validate...",
+				percentage: 0,
+			}
+		}
+	);
+
+	let filesToValidate: string[] = [];
+	while (foldersToVisit.length !== 0) {
+		const files = await promisify(readdir)(foldersToVisit[0]);
+		const fileStats = await Promise.all(files
+			.map(file => promisify(stat)(join(foldersToVisit[0], file)))
+		)
+
+		for (let i = 0; i < files.length; i++) {
+			const path = join(foldersToVisit[0], files[i]);
+			const isIgnored: boolean = ignoredFolders
+				.filter(ignored => path.endsWith(ignored))
+				.length !== 0
+
+			if (isIgnored) {
+				continue;
+			}
+
+			if (fileStats[i].isDirectory()) {
+				foldersToVisit.push(path);
+			}
+			else if (path.endsWith(".das")) {
+				filesToValidate.push(path);
+			}
+		}
+
+		foldersToVisit.shift();
+	}
+
+	for (const [file, i] of zip(filesToValidate, range(1, filesToValidate.length))) {
+		if (validationCancelled) {
+			return;
+		}
+
+		const fileParts = file.split("/")
+		const validationCacheFile = path.resolve('.dascript', ...fileParts.splice(0, -1), `${last(fileParts)}.json`)
+
+		try {
+			const res = (await promisify(fs.readFile)(validationCacheFile, {encoding : 'utf8'}));
+			try {
+				const cachedValidation = JSON.parse(
+					res
+				);
+				console.log(`Found validation cache file, ${validationCacheFile}`);
+				validatingResults[file] = cachedValidation;
+
+				continue;
+			}
+			catch (err) {
+				console.log('Failed to parse', file);
+			}
+		}
+		catch (err) {
+			console.log(`Validation cache file not found, ${validationCacheFile}`);
+		}
+
+		await connection.sendNotification(
+			"$/progress",
+			{
+				token,
+				value: <WorkDoneProgressReport>{
+					kind: "report",
+					message: `(${i}/${filesToValidate.length}) ${path.relative(dir, file)}`,
+					percentage: (i / filesToValidate.length) * 100,
+				}
+			}
+		);
+
+		await validatingQueue.enqueue(
+			file,
+			async () => {
+				await validateTextDocument(TextDocument.create(
+					file,
+					"dascript",
+					1,
+					(await promisify(readFile)(file)).toString()
+				));
+			}
+		)
+	}
+
+	await connection.sendNotification(
+		"$/progress",
+		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
+	);
 }
 
 async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
@@ -1483,6 +1505,20 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			}
 			console.time('storeValidationResult')
 			storeValidationResult(settings, textDocument, result, diagnostics)
+
+			let uriParts = textDocument.uri.split("/");
+			try {
+				fs.mkdirSync(path.resolve(".dascript", ...uriParts.slice(0, -1)), {recursive: true});
+				fs.writeFileSync(
+					path.resolve('.dascript', ...uriParts.slice(0, -1), `${last(uriParts)}.json`),
+					validateTextResult,
+					{encoding: 'utf8'}
+				)
+			}
+			catch (err) {
+				console.log(err);
+			}
+
 			console.timeEnd('storeValidationResult')
 		} else { // result == null
 			if (!diagnostics.has(textDocument.uri))
@@ -1940,15 +1976,6 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 	}
 
 	validatingResults.set(uri, fixedResults);
-
-	if (!fs.existsSync(path.resolve(".dascript"))) {
-		fs.mkdirSync(path.resolve(".dascript"));
-	}
-
-	fs.appendFileSync(
-		path.resolve('.dascript', `${last(uri.split("/"))}.json`),
-		JSON.stringify(fixedResults)
-	)
 
 	connection.languages.inlayHint.refresh()
 }
