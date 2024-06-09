@@ -19,6 +19,9 @@ import {
 	TextDocumentSyncKind,
 	TextDocuments,
 	TextEdit,
+	WorkDoneProgressBegin,
+	WorkDoneProgressEnd,
+	WorkDoneProgressReport,
 	WorkspaceEdit,
 	WorkspaceFolder,
 	createConnection,
@@ -26,6 +29,7 @@ import {
 } from 'vscode-languageserver/node'
 
 import {
+	DocumentUri,
 	TextDocument
 } from 'vscode-languageserver-textdocument'
 
@@ -36,7 +40,11 @@ import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
 import os = require('os')
-import { get } from 'http'
+import { promisify } from 'util'
+import { readFile, readdir, stat } from 'fs'
+import { ValidatingQueue } from './validatingQueue'
+import { zip, range } from 'lodash'
+import { join } from 'path'
 
 enum DiagnosticsActionType {
 	UnusedReq = 0,
