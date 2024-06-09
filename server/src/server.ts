@@ -1128,7 +1128,7 @@ connection.onInitialized(async () => {
 		})
 	}
 
-	revalidateWorkspace();
+	// revalidateWorkspace();
 })
 
 connection.onExecuteCommand(async (params) => {
@@ -1349,7 +1349,7 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 			console.log(`Found validation cache file, ${validationCacheFile}`);
 			
 			const diagnostics = sendDiagnostics(result, file, settings);
-			// storeValidationResult(settings, textDocument, result, diagnostics)
+			storeValidationResult(settings, textDocument, result, diagnostics)
 
 			continue;
 		}
@@ -1612,7 +1612,7 @@ function baseTypeToCompletionItemKind(baseType: string) {
 	return CompletionItemKind.Struct
 }
 
-function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]>) {
+function  storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]>) {
 	const uri = doc.uri
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
