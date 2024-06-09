@@ -212,7 +212,9 @@ def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Struct
     res.result.structs |> emplace(st)
 
 /// type decl
-def cleanupTDK(str : string) : string
+// TODO: support optional type (split by | )
+// TODO: keep full type name as separate field (for preview)
+def private cleanupTDK(str : string) : string
     var parts <- str |> split("const?")
 
     for res in parts
@@ -348,8 +350,9 @@ def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : 
     fn |> fill_at(f.at)
     if f._module != null
         fn.mod = f._module.name |> string()
-    if f.origin != null && f.origin._module != null
-        fn.origMod = f.origin._module.name |> string()
+    var origin = f.origin
+    if origin != null && origin._module != null
+        fn.origMod = origin._module.name |> string()
     if f.result != null
         fn.tdk = TypeDeclKey(f.result)
         res |> parse_typedecl(fn.tdk, f.result)

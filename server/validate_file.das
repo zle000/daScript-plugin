@@ -29,7 +29,6 @@ struct ValidateConfig
     file : string
     originalFile : string
     projectFile : string
-    args : string
     resultFile : string
     ignoreSharedModules : bool
     noGlobalVariables : bool
@@ -60,7 +59,6 @@ def main()
     config.file = args |> arg_value("--file", "")
     config.originalFile = args |> arg_value("--original-file", config.file)
     config.projectFile = args |> arg_value("--project-file", "")
-    config.args = args |> arg_value("--args", "")
     config.resultFile = args |> arg_value("--result", "")
 
     config.ignoreSharedModules = args |> has_value("--ignore-shared-modules")
@@ -103,7 +101,7 @@ struct DasError : CompletionAt
 
 struct ModDeps
     mod : string
-    isPublic : bool
+    depth : int
 
 struct ModuleRequirement : CompletionAt
     mod : string
@@ -193,17 +191,19 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                                 modReq.file = "{file}"
                                 if mod != null
                                     var allMods : table<uint64>
-                                    var mods : array<tuple<mod : Module?; isPublic : bool>>
+                                    var mods : array<tuple<mod : Module?; depth : int>>
                                     allMods |> insert(intptr(mod))
-                                    mods |> push([[auto mod, true]]) // root dep is public for local module
+                                    mods |> push([[auto mod, 0]]) // root dep is public for local module
                                     while length(mods) > 0
                                         var mod2 = mods |> back()
                                         mods |> pop()
                                         mod2.mod |> module_for_each_dependency() <| $(dep, isPublic2)
-                                            var depData = [[ModDeps() mod = dep != null ? "{dep.name}" : "", isPublic = mod2.isPublic && isPublic2]]
+                                            return if !isPublic2
+
+                                            var depData = [[ModDeps() mod = dep != null ? "{dep.name}" : "", depth = mod2.depth + 1]]
                                             modReq.dependencies |> emplace(depData)
                                             if !allMods |> key_exists(intptr(dep))
-                                                mods |> push([[auto dep, isPublic2]])
+                                                mods |> push([[auto dep, mod2.depth + 1]])
                                                 allMods |> insert(intptr(dep))
 
                                 res.requirements |> emplace(modReq)
@@ -243,7 +243,7 @@ struct DasToken : CompletionAt
     // ptr : uint64
 
 
-def DasToken(expr; var completion : CompletionContext?) : DasToken
+[unused_argument(completion)] def DasToken(expr; var completion : CompletionContext ?) : DasToken
     var token = DasToken()
     token.kind = "{expr.__rtti}"
     if expr._type != null
@@ -260,6 +260,7 @@ class AstData : AstVisitor
     [[do_not_delete]] completion : CompletionContext?
     skipExprs : array<bool>
     visitedExprs : table<uint64>
+    visitedTypedecls : table<uint64>
     // def override preVisitFunction(fun:FunctionPtr) : void
     //     debug(fun)
     // def override preVisitExprTypeDecl(expr:smart_ptr<ExprTypeDecl>) : void
@@ -331,6 +332,9 @@ class AstData : AstVisitor
     def preVisitTypeDecl_(typ : TypeDeclPtr) : int
         if typ == null
             return -1
+        if key_exists(visitedTypedecls, intptr(typ))
+            return -1
+        visitedTypedecls |> insert(intptr(typ))
         let tdk = TypeDeclKey(typ)
         *completion |> parse_typedecl(tdk, typ)
         var token <- DasToken()
@@ -396,10 +400,16 @@ class AstData : AstVisitor
             token.name = "{exprAddr.target}"
             if exprAddr.func != null
                 token.declAt |> fill_at(exprAddr.func.at)
-                // if exprAddr.func.result != null
-                //     token.tdk = TypeDeclKey(exprAddr.func.result)
+                if exprAddr.func.result != null
+                    let resTdk = TypeDeclKey(exprAddr.func.result)
                 //     token.isConst = exprAddr.func.result.flags.constant
-                //     *completion |> parse_typedecl(token.tdk, exprAddr.func.result)
+                    *completion |> parse_typedecl(resTdk, exprAddr.func.result)
+        elif expr is ExprGoto
+            let gt = expr as ExprGoto
+            token.name = "{gt.labelName}"
+        elif expr is ExprLabel
+            let lbl = expr as ExprLabel
+            token.name = "{lbl.labelName}"
         else
             token.name = expr |> describe()
         res.tokens |> emplace(token)
@@ -490,21 +500,21 @@ class AstData : AstVisitor
     def override preVisitExprVar(expr : smart_ptr<ExprVar>) : void
         if length(skipExprs) > 0 || expr == null || expr.genFlags.generated
             return
+        if expr.variable == null || expr.variable.flags.generated
+            return
         var token <- DasToken(expr, completion)
-        token.name = "{expr.name}"
-        if expr.variable != null
-            token.name = "{expr.variable.name}"
-            token.declAt |> fill_at(expr.variable.at)
-            token.mod = expr.variable._module != null ? "{expr.variable._module.name}" : ""
-            if token.mod == ""
-                token.mod = funcModule
-            if expr.variable.init != null
-                token.value = expr.variable.init |> describe()
-            if expr.variable._type != null
-                token.tdk = TypeDeclKey(expr.variable._type)
-                token.isConst = expr.variable._type.flags.constant
-                token.alias = expr.variable._type.alias |> string()
-                *completion |> parse_typedecl(token.tdk, expr.variable._type)
+        token.name = "{expr.variable.name}"
+        token.declAt |> fill_at(expr.variable.at)
+        token.mod = expr.variable._module != null ? "{expr.variable._module.name}" : ""
+        if token.mod == ""
+            token.mod = funcModule
+        if expr.variable.init != null
+            token.value = expr.variable.init |> describe()
+        if expr.variable._type != null
+            token.tdk = TypeDeclKey(expr.variable._type)
+            token.isConst = expr.variable._type.flags.constant
+            token.alias = expr.variable._type.alias |> string()
+            *completion |> parse_typedecl(token.tdk, expr.variable._type)
         // if expr._type != null
         //     token.isConst = expr._type.flags.constant
         //     token.tdk = TypeDeclKey(expr._type)
