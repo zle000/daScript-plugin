@@ -105,6 +105,7 @@ function debugWsFolders() {
 documents.onDidChangeContent((event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
 	connection.languages.inlayHint.refresh()
+	console.log(event.document.version);
 	forceUpdateDocumentData(event.document)
 })
 
@@ -1471,7 +1472,7 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 		}
 
 		const textDocument = TextDocument.create(
-			file,
+			URI.parse(file).toString(),
 			"dascript",
 			1,
 			(await promisify(readFile)(file)).toString()
@@ -1778,7 +1779,7 @@ function  storeValidationResult(settings: DasSettings, doc: TextDocument, res: V
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map(), }
-	if (res.errors.length > 0) {
+	if (res.errors.length > 0 && validatingResults.has(uri)) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
 
