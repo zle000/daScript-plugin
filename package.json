@@ -357,8 +357,8 @@
 				"title": "daScript: Revalidate workspace"
 			},
 			{
-				"command": "dascript.cancelValidation",
-				"title": "daScript: Cancel workspace validation"
+				"command": "dascript.clearValidationCache",
+				"title": "daScript: Clear validation cache"
 			}
 		]
 	},

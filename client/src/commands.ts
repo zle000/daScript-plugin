@@ -18,10 +18,10 @@ function registerValidateCommand(client: LanguageClient): Disposable[] {
             )
         ),
         commands.registerCommand(
-            'dascript.cancelValidation',
+            'dascript.clearValidationCache',
             async () => await client.sendRequest(
                 new RequestType(ExecuteCommandRequest.method),
-                {command: 'cancelValidation'}
+                {command: 'clearValidationCache'}
             )
         )
     ]

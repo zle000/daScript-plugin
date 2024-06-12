@@ -33,7 +33,7 @@ import {
 	TextDocument
 } from 'vscode-languageserver-textdocument'
 
-import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
+import { ChildProcessWithoutNullStreams, fork, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
 import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, CompletionResult, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findStruct, findTypeDecl, findTypeDef, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, moduleTdk, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
@@ -43,7 +43,7 @@ import os = require('os')
 import { promisify } from 'util'
 import { readFile, readdir, stat } from 'fs'
 import { ValidatingQueue } from './validatingQueue'
-import { zip, range } from 'lodash'
+import { zip, range, isNil } from 'lodash'
 import { join } from 'path'
 
 enum DiagnosticsActionType {
@@ -70,11 +70,12 @@ let workspaceFolders: WorkspaceFolder[] | null
 let hasConfigurationCapability = false
 let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
-let validationCancelled = false;
+
+const validationCacheFolder = '.dascript'
 
 const serverCommandHandlers: {[k in string]: () => Promise<void>} = {
-    'revalidateWorkspace': async () => await revalidateWorkspace(),
-	'cancelRevalidation': async () => await cancelRevalidation(),
+    'revalidateWorkspace': async () => await validateWorkspace(),
+	'clearValidationCache': async () => await clearCachedValidationData(),
 }
 
 
@@ -1267,7 +1268,7 @@ connection.onInitialized(async () => {
 		})
 	}
 
-	// revalidateWorkspace();
+	validateWorkspace();
 })
 
 connection.onExecuteCommand(async (params) => {
@@ -1276,10 +1277,6 @@ connection.onExecuteCommand(async (params) => {
 	}
 
 	serverCommandHandlers[params.command]();
-	if (params.command == 'cancelValidation') {
-		validationCancelled = true;
-		return;
-	}
 })
 
 let globalSettings = defaultSettings
@@ -1368,14 +1365,18 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
-async function revalidateWorkspace(): Promise<void> {
+async function validateWorkspace(): Promise<void> {
+	console.time('Workspace validation started...');
+	
 	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
 		await validateWorkspaceFolder(folder);
 	}
+
+	console.timeEnd('Workspace finished...');
 }
 
-async function cancelRevalidation(): Promise<void> {
-	validationCancelled = true;
+async function clearCachedValidationData(): Promise<void> {
+	fs.rmSync(path.resolve(validationCacheFolder), {recursive: true});
 }
 
 function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
@@ -1415,6 +1416,43 @@ function sendDiagnostics(result: ValidationResult, file: string, settings: DasSe
 	return diagnostics;
 }
 
+async function loadCachedValidationData(file: string): Promise<[TextDocument, ValidationResult | null]> {
+	const textDocument = TextDocument.create(
+		URI.parse(file).toString(),
+		"dascript",
+		1,
+		(await promisify(readFile)(file)).toString()
+	);
+	const validationCacheFile = path.resolve(validationCacheFolder, `${mangleFileUri(file)}.json`)
+	const settings = await getDocumentSettings(file);
+
+	let fileContent: string;
+	let parsedContent: ValidationResult
+
+	try {
+		fileContent = await promisify(fs.readFile)(validationCacheFile, {encoding : 'utf8'});
+	}
+	catch (e) {
+		console.log(`Validation cache file not found, ${validationCacheFile}`, e);
+		return [textDocument, null];
+	}
+
+	try {
+		parsedContent = JSON.parse(fileContent) as ValidationResult;
+	}
+	catch (e) {
+		console.log('Failed to parse', file);
+		return [textDocument, null];
+	}
+
+	console.log(`Found validation cache file, ${validationCacheFile}`);
+		
+	const diagnostics = sendDiagnostics(parsedContent, file, settings);
+	storeValidationResult(settings, textDocument, parsedContent, diagnostics);
+
+	return [textDocument, parsedContent];
+}
+
 async function validateWorkspaceFolder(dir: string): Promise<void> {
 	let foldersToVisit: string[] = [dir]
 	let validatingQueue: ValidatingQueue = new ValidatingQueue(5);
@@ -1430,7 +1468,7 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 			token,
 			value: <WorkDoneProgressBegin>{
 				kind: "begin",
-				title: `Validation`,
+				title: `Loading validation data`,
 				message: "Collecting files to validate...",
 				percentage: 0,
 			}
@@ -1465,49 +1503,14 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 		foldersToVisit.shift();
 	}
 
-	let fileContent: string;
 	for (const [file, i] of zip(filesToValidate, range(1, filesToValidate.length))) {
-		if (validationCancelled) {
-			return;
-		}
-
-		const textDocument = TextDocument.create(
-			URI.parse(file).toString(),
-			"dascript",
-			1,
-			(await promisify(readFile)(file)).toString()
-		);
-		const validationCacheFile = path.resolve('.dascript', `${mangleFileUri(file)}.json`)
-		const settings = await getDocumentSettings(file);
-
-		try {
-			fileContent = (await promisify(fs.readFile)(validationCacheFile, {encoding : 'utf8'}));
-			const result = JSON.parse(fileContent) as ValidationResult;
-			fileContent = ""
-			
-			console.log(`Found validation cache file, ${validationCacheFile}`);
-			
-			const diagnostics = sendDiagnostics(result, file, settings);
-			storeValidationResult(settings, textDocument, result, diagnostics)
-
-			continue;
-		}
-		catch (err) {
-			if (err instanceof SyntaxError) {
-				console.log('Failed to parse', file);
-			}
-			else {
-				console.log(`Validation cache file not found, ${validationCacheFile}`);
-			}
-		}
-
 		await connection.sendNotification(
 			"$/progress",
 			{
 				token,
 				value: <WorkDoneProgressReport>{
 					kind: "report",
-					message: `(${i}/${filesToValidate.length}) ${path.relative(dir, file)}`,
+					message: `${i}/${filesToValidate.length} (${path.relative(dir, file)})`,
 					percentage: (i / filesToValidate.length) * 100,
 				}
 			}
@@ -1515,7 +1518,13 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 
 		await validatingQueue.enqueue(
 			file,
-			async () => await validateTextDocument(textDocument)
+			async () => {
+				const [textDocument, validationResult] = await loadCachedValidationData(file);
+
+				if (isNil(validationResult)) {
+					await validateTextDocument(textDocument);
+				}
+			}
 		)
 	}
 
@@ -1702,7 +1711,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			console.time('storeValidationResult')
 			storeValidationResult(settings, textDocument, result, diagnostics)
 
-			const filename = path.resolve('.dascript', `${mangleFileUri(textDocument.uri)}.json`)
+			const filename = path.resolve(validationCacheFolder, `${mangleFileUri(textDocument.uri)}.json`)
 			try {
 				fs.writeFileSync(
 					filename,
