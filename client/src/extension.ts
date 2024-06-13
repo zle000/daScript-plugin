@@ -1,17 +1,14 @@
 import * as path from 'path'
 import * as cp from 'child_process'
 import {
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, DebugConfigurationProvider, DebugConfiguration, ProviderResult, CancellationToken,
-	commands,
-	window
+	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, DebugConfigurationProvider, DebugConfiguration, ProviderResult, CancellationToken
 } from 'vscode'
 import { runInTerminal } from 'run-in-terminal'
 
 import * as vscode from 'vscode'
 
 import {
-	ExecuteCommandRequest,
-	LanguageClient, LanguageClientOptions, NotificationType, RequestType, TransportKind
+	LanguageClient, LanguageClientOptions, TransportKind
 } from 'vscode-languageclient/node'
 import { registerClientCommands } from './commands'
 
@@ -52,6 +49,7 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 }
 
 export function activate(context: ExtensionContext) {
+
 	const module = context.asAbsolutePath(path.join('server', 'out', 'server.js'))
 	const outputChannel: OutputChannel = Window.createOutputChannel('daScript2')
 

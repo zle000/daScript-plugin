@@ -33,7 +33,7 @@ import {
 	TextDocument
 } from 'vscode-languageserver-textdocument'
 
-import { ChildProcessWithoutNullStreams, fork, spawn } from 'child_process'
+import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
 import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, CompletionResult, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findStruct, findTypeDecl, findTypeDef, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, moduleTdk, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
@@ -72,6 +72,8 @@ let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
 
 const validationCacheFolder = path.join(os.homedir(), '.dascript');
+const validatingQueueCapacity = 5;
+const cacheLoadingQueueCapacity = 10;
 
 const serverCommandHandlers: {[k in string]: () => Promise<void>} = {
     'revalidateWorkspace': async () => await validateWorkspace(),
@@ -106,7 +108,6 @@ function debugWsFolders() {
 documents.onDidChangeContent((event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
 	connection.languages.inlayHint.refresh()
-	console.log(event.document.version);
 	forceUpdateDocumentData(event.document)
 })
 
@@ -1256,7 +1257,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	return res
 })
 
-connection.onInitialized(async () => {
+connection.onInitialized(() => {
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined)
@@ -1268,7 +1269,7 @@ connection.onInitialized(async () => {
 		})
 	}
 
-	validateWorkspace();
+	loadWorkspaceValidation();
 })
 
 connection.onExecuteCommand(async (params) => {
@@ -1365,9 +1366,24 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
+async function loadWorkspaceValidation(): Promise<void> {
+	let timerName: string = 'loadWorkspaceValidation';
+
+	console.time(timerName);
+	console.log('Validation data cache folder', validationCacheFolder);
+	
+	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+		await validateWorkspaceFolder(folder, {cacheOnly: true, queueCapacity: cacheLoadingQueueCapacity});
+	}
+
+	console.timeEnd(timerName);
+}
+
 async function validateWorkspace(): Promise<void> {
-	console.time('Workspace validation');
-	console.log('Validati cache folder', validationCacheFolder);
+	let timerName: string = 'validateWorkspace';
+
+	console.time(timerName);
+	console.log('Validation data cache folder', validationCacheFolder);
 	
 	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
 		const cacheFolder = path.join(validationCacheFolder, path.basename(folder));
@@ -1379,7 +1395,7 @@ async function validateWorkspace(): Promise<void> {
 		await validateWorkspaceFolder(folder);
 	}
 
-	console.timeEnd('Workspace validation');
+	console.timeEnd(timerName);
 }
 
 async function clearCachedValidationData(): Promise<void> {
@@ -1423,15 +1439,7 @@ function sendDiagnostics(result: ValidationResult, file: string, settings: DasSe
 	return diagnostics;
 }
 
-async function loadCachedValidationData(file: string, validationCacheFile: string): Promise<[TextDocument, ValidationResult | null]> {
-	const textDocument = TextDocument.create(
-		URI.parse(file).toString(),
-		"dascript",
-		1,
-		(await promisify(readFile)(file)).toString()
-	);
-	const settings = await getDocumentSettings(file);
-
+async function loadCachedValidationData(validationCacheFile: string): Promise<ValidationResult | null> {
 	let fileContent: string;
 	let parsedContent: ValidationResult
 
@@ -1440,28 +1448,25 @@ async function loadCachedValidationData(file: string, validationCacheFile: strin
 	}
 	catch (e) {
 		console.log(`Validation cache file not found, ${validationCacheFile}`, e);
-		return [textDocument, null];
+		return null;
 	}
 
 	try {
 		parsedContent = JSON.parse(fileContent) as ValidationResult;
 	}
 	catch (e) {
-		console.log('Failed to parse', file);
-		return [textDocument, null];
+		console.log('Failed to parse', validationCacheFile);
+		return null;
 	}
 
 	console.log(`Found validation cache file, ${validationCacheFile}`);
-		
-	const diagnostics = sendDiagnostics(parsedContent, file, settings);
-	storeValidationResult(settings, textDocument, parsedContent, diagnostics);
 
-	return [textDocument, parsedContent];
+	return parsedContent;
 }
 
-async function validateWorkspaceFolder(dir: string): Promise<void> {
+async function validateWorkspaceFolder(dir: string, extra : {cacheOnly?: boolean, queueCapacity?: number} = {cacheOnly: false, queueCapacity: validatingQueueCapacity}): Promise<void> {
 	let foldersToVisit: string[] = [dir]
-	let validatingQueue: ValidatingQueue = new ValidatingQueue(5);
+	let validatingQueue: ValidatingQueue = new ValidatingQueue(extra?.queueCapacity);
 	const ignoredFolders: string[] = [".git", ".github"]	
 	const token = `validation/${dir}`;
 
@@ -1527,11 +1532,26 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 			async () => {
 				const cacheFileName: string = `${mangleFileUri(path.relative(dir, file))}.json`;
 				const cacheFilePath: string = path.join(validationCacheFolder, path.basename(dir), cacheFileName);
-				const [textDocument, validationResult] = await loadCachedValidationData(file, cacheFilePath);
+				const validationResult = await loadCachedValidationData(cacheFilePath);
+
+				if (isNil(validationResult) && extra?.cacheOnly) {
+					return;
+				}
+
+				const textDocument = TextDocument.create(
+					URI.parse(file).toString(),
+					'dascript',
+					1,
+					(await promisify(readFile)(file)).toString()
+				);
 
 				if (isNil(validationResult)) {
-					await validateTextDocument(textDocument);
+					return await validateTextDocument(textDocument);
 				}
+				
+				const settings = await getDocumentSettings(file);
+				const diagnostics = sendDiagnostics(validationResult, file, settings);
+				storeValidationResult(settings, textDocument, validationResult, diagnostics);
 			}
 		)
 	}
