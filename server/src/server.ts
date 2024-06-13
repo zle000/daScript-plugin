@@ -71,7 +71,7 @@ let hasConfigurationCapability = false
 let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
 
-const validationCacheFolder = '.dascript'
+const validationCacheFolder = path.join(os.homedir(), '.dascript');
 
 const serverCommandHandlers: {[k in string]: () => Promise<void>} = {
     'revalidateWorkspace': async () => await validateWorkspace(),
@@ -1366,13 +1366,20 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 }
 
 async function validateWorkspace(): Promise<void> {
-	console.time('Workspace validation started...');
+	console.time('Workspace validation');
+	console.log('Validati cache folder', validationCacheFolder);
 	
 	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+		const cacheFolder = path.join(validationCacheFolder, path.basename(folder));
+		
+		if (!fs.existsSync(cacheFolder)) {
+			fs.mkdirSync(cacheFolder, {recursive: true});
+		}
+		
 		await validateWorkspaceFolder(folder);
 	}
 
-	console.timeEnd('Workspace finished...');
+	console.timeEnd('Workspace validation');
 }
 
 async function clearCachedValidationData(): Promise<void> {
@@ -1416,14 +1423,13 @@ function sendDiagnostics(result: ValidationResult, file: string, settings: DasSe
 	return diagnostics;
 }
 
-async function loadCachedValidationData(file: string): Promise<[TextDocument, ValidationResult | null]> {
+async function loadCachedValidationData(file: string, validationCacheFile: string): Promise<[TextDocument, ValidationResult | null]> {
 	const textDocument = TextDocument.create(
 		URI.parse(file).toString(),
 		"dascript",
 		1,
 		(await promisify(readFile)(file)).toString()
 	);
-	const validationCacheFile = path.resolve(validationCacheFolder, `${mangleFileUri(file)}.json`)
 	const settings = await getDocumentSettings(file);
 
 	let fileContent: string;
@@ -1519,7 +1525,9 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 		await validatingQueue.enqueue(
 			file,
 			async () => {
-				const [textDocument, validationResult] = await loadCachedValidationData(file);
+				const cacheFileName: string = `${mangleFileUri(path.relative(dir, file))}.json`;
+				const cacheFilePath: string = path.join(validationCacheFolder, path.basename(dir), cacheFileName);
+				const [textDocument, validationResult] = await loadCachedValidationData(file, cacheFilePath);
 
 				if (isNil(validationResult)) {
 					await validateTextDocument(textDocument);
@@ -1532,6 +1540,16 @@ async function validateWorkspaceFolder(dir: string): Promise<void> {
 		"$/progress",
 		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
 	);
+}
+
+function getWorkspaceDir(file: string): string | null {
+	for (const folder of workspaceFolders) {
+		if (file.startsWith(folder.uri)) {
+			return folder.uri
+		}
+	}
+
+	return null;
 }
 
 async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
@@ -1711,16 +1729,21 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			console.time('storeValidationResult')
 			storeValidationResult(settings, textDocument, result, diagnostics)
 
-			const filename = path.resolve(validationCacheFolder, `${mangleFileUri(textDocument.uri)}.json`)
-			try {
-				fs.writeFileSync(
-					filename,
-					validateTextResult,
-					{encoding: 'utf8'}
-				)
-			}
-			catch (err) {
-				console.log(err);
+			const workspaceDir = getWorkspaceDir(textDocument.uri);
+			if (!isNil(workspaceDir)) {
+				const cacheFileName: string = `${mangleFileUri(path.relative(workspaceDir, textDocument.uri))}.json`;
+				const cacheFilePath: string = path.join(validationCacheFolder, path.basename(workspaceDir), cacheFileName);
+				try {
+					console.log('Writing cache file', cacheFilePath);
+					fs.writeFileSync(
+						cacheFilePath,
+						validateTextResult,
+						{encoding: 'utf8'}
+					)
+				}
+				catch (err) {
+					console.log(err);
+				}
 			}
 
 			console.timeEnd('storeValidationResult')
