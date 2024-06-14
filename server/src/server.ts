@@ -1700,8 +1700,6 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			return
 		}
 
-		console.log(documents.get(textDocument.uri) );
-		console.log(documents.get(textDocument.uri) == null);
 		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri) != null && documents.get(textDocument.uri)?.version !== textDocument.version) {
 			console.log('document version changed, ignoring result', textDocument.uri)
 			thisResolve()
@@ -1755,6 +1753,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 				const cacheFilePath: string = path.join(validationCacheFolder, path.basename(workspaceDir), cacheFileName);
 				try {
 					console.log('Writing cache file', cacheFilePath);
+					//TODO: replace with async bc we don't really care when this file finishes writing
 					fs.writeFileSync(
 						cacheFilePath,
 						validateTextResult,
