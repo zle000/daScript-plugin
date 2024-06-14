@@ -1408,7 +1408,12 @@ async function validateWorkspace(): Promise<void> {
 }
 
 async function clearCachedValidationData(): Promise<void> {
-	fs.rmSync(path.resolve(validationCacheFolder), {recursive: true});
+	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+		fs.rmSync(
+			path.join(validationCacheFolder, path.basename(folder)),
+			{recursive: true}
+		);
+	}
 }
 
 function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
