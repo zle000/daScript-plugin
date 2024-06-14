@@ -72,7 +72,7 @@ let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
 
 const validationCacheFolder = path.join(os.homedir(), '.dascript');
-const validatingQueueCapacity = 5;
+let validatingQueueCapacity = 5;
 const cacheLoadingQueueCapacity = 10;
 
 const serverCommandHandlers: {[k in string]: () => Promise<void>} = {
@@ -1257,7 +1257,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	return res
 })
 
-connection.onInitialized(() => {
+connection.onInitialized(async () => {
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined)
@@ -1269,7 +1269,16 @@ connection.onInitialized(() => {
 		})
 	}
 
-	loadWorkspaceValidation();
+	let config = await connection.workspace.getConfiguration({
+		scopeUri: 'resource',
+		section: 'dascript'
+	})
+
+	validatingQueueCapacity = config?.project?.compilationConcurrency ?? validatingQueueCapacity;
+
+	if (config?.project?.scanWorkspace) {
+		loadWorkspaceValidation();
+	}
 })
 
 connection.onExecuteCommand(async (params) => {

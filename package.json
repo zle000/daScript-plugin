@@ -276,6 +276,12 @@
 					"default": false,
 					"description": "Scan/compile all files in workspace"
 				},
+				"dascript.project.compilationConcurrency": {
+					"scope": "resource",
+					"type": "number",
+					"default": 5,
+					"description": "Number of processes to use while validating (compiling) workspace"
+				},
 				"dascript.project.roots": {
 					"scope": "resource",
 					"type": "array",
