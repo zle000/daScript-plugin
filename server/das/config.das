@@ -18,7 +18,7 @@ struct PluginConfigPolicies
     failOnLackOfAotExport : bool = false
 
 def PluginConfigPolicies(val : JsonValue?)
-    return <- [[PluginConfigPolicies
+    return <- [[PluginConfigPolicies()
         ignoreSharedModules = job(val, "ignore_shared_modules", true),
         noGlobalVariables = job(val, "no_global_variables"),
         noUnusedBlockArguments = job(val, "no_unused_block_arguments"),

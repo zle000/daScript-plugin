@@ -379,12 +379,12 @@ struct Position
     character : int = 0
 
 def Position(line, character : int)
-    return <- [[Position line = line, character = character]]
+    return <- [[Position() line = line, character = character]]
 
 def Position(val : JsonValue?)
     if val == null || val.value is _null
-        return <- [[Position]]
-    return <- [[Position line = int(jon(val, "line")), character = int(jon(val, "character")) ]]
+        return <- [[Position()]]
+    return <- [[Position() line = int(jon(val, "line")), character = int(jon(val, "character")) ]]
 
 def operator <(a, b : Position)
     return a.line < b.line || (a.line == b.line && a.character < b.character)
@@ -429,7 +429,7 @@ def index_to_pos(index : int; text : string) : Position
             charPos = 0
             continue
         charPos++
-    return [[Position line = line, character = charPos]]
+    return [[Position() line = line, character = charPos]]
 
 def to_string(val : Position)
     return "{int(val.line)}:{int(val.character)}"
@@ -447,7 +447,7 @@ def Range(start_line, start_char, end_line, end_char : int)
 
 def Range(val : JsonValue?)
     if val == null || val.value is _null
-        return <- [[Range start = [[Position]], end = [[Position]] ]]
+        return <- [[Range start = [[Position()]], end = [[Position()]] ]]
     return <- [[Range start <- Position(joj(val, "start")), end <- Position(joj(val, "end")) ]]
 
 def in_range(pos : Position; r : Range)
