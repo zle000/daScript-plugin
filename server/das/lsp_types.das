@@ -857,10 +857,10 @@ def to_string(c : Color; len : int) : string
     return build_string() <| $(var str)
         write(str, "0x")
         if len > 8
-            format(str, "%02X", int(c.alpha * 255lf))
-        format(str, "%02X", int(c.red * 255lf))
-        format(str, "%02X", int(c.green * 255lf))
-        format(str, "%02X", int(c.blue * 255lf))
+            fmt(str, ":02X", int(c.alpha * 255lf))
+        fmt(str, ":02X", int(c.red * 255lf))
+        fmt(str, ":02X", int(c.green * 255lf))
+        fmt(str, ":02X", int(c.blue * 255lf))
 
 struct ColorInformation
     _range : Range
