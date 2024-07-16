@@ -8,7 +8,7 @@ export function registerClientCommands(context: ExtensionContext, client: Langua
     );
 }
 
-async function revalidateWorkspaceCommand(client: LanguageClient): Promise<void> {
+async function validateWorkspaceCommand(client: LanguageClient): Promise<void> {
     let workspaceFolder: WorkspaceFolder = await window.showWorkspaceFolderPick({
         placeHolder: 'Select folder',
     })
@@ -19,15 +19,15 @@ async function revalidateWorkspaceCommand(client: LanguageClient): Promise<void>
 
     await client.sendRequest(
         new RequestType(ExecuteCommandRequest.method),
-        {command: 'revalidateWorkspace', args: {folder: workspaceFolder.uri}}
+        {command: 'validateWorkspace', args: {folder: workspaceFolder.uri}}
     )
 }
 
 function registerValidateCommand(client: LanguageClient): Disposable[] {
     return [
         commands.registerCommand(
-            'dascript.revalidateWorkspace',
-            async () => await revalidateWorkspaceCommand(client)
+            'dascript.validateWorkspace',
+            async () => await validateWorkspaceCommand(client)
         ),
         commands.registerCommand(
             'dascript.clearValidationCache',

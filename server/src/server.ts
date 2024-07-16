@@ -41,7 +41,7 @@ import path = require('path')
 import fs = require('fs')
 import os = require('os')
 import { promisify } from 'util'
-import { readFile, readdir, stat } from 'fs'
+import { readdir } from 'fs'
 import { ValidatingQueue } from './validatingQueue'
 import { zip, range, isNil } from 'lodash'
 import { join } from 'path'
@@ -53,6 +53,12 @@ enum DiagnosticsActionType {
 interface DiagnosticsAction {
 	type: DiagnosticsActionType
 	data: LSPAny
+}
+
+interface WorkspaceValidationParams {
+	saveCache: boolean,
+	cacheFolder?: string,
+	queueCapacity: number,
 }
 
 // Creates the LSP connection
@@ -73,14 +79,22 @@ let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
 
 const validationCacheFolder = './.dascript';
-let validatingQueueCapacity = 5;
-const cacheLoadingQueueCapacity = 10;
+const defaultWorkspaceValidationParams = <WorkspaceValidationParams>{
+	saveCache: false,
+	cacheFolder: './dascript',
+	queueCapacity: 16
+}
 
 const serverCommandHandlers: {[k in string]: (args: any) => Promise<void>} = {
-    'revalidateWorkspace': async args => await validateWorkspaceCommand(args),
+    'validateWorkspace': async args => await validateWorkspaceCommand(args),
 	'clearValidationCache': async _ => await clearCachedValidationDataCommand(),
 }
 
+
+function setWorkspaceValidationParams(config: any) {
+	defaultWorkspaceValidationParams.saveCache = config?.project?.storeCompilationData ?? defaultWorkspaceValidationParams.saveCache
+	defaultWorkspaceValidationParams.queueCapacity = config?.project?.compilationConcurrency ?? defaultWorkspaceValidationParams.queueCapacity
+}
 
 function mangleFileUri(uri: DocumentUri, version?: number): string {
 	const filePath = URI.parse(uri).fsPath;
@@ -1275,14 +1289,15 @@ connection.onInitialized(async () => {
 		section: 'dascript'
 	})
 
-	validatingQueueCapacity = config?.project?.compilationConcurrency ?? validatingQueueCapacity;
-
-	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+	setWorkspaceValidationParams(config);
+	
+	const workspaceFolderPaths = workspaceFolders.map(f => URI.parse(f.uri).fsPath)
+	for (const folder of workspaceFolderPaths) {
 		workspaceFiles.set(folder, await collectWorkspaceFiles(folder));
 	}
 	
 	if (config?.project?.scanWorkspace) {
-		loadWorkspaceValidation();
+		validateWorkspaceCommand({}, defaultWorkspaceValidationParams);
 	}
 })
 
@@ -1380,41 +1395,17 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
-async function loadWorkspaceValidation(): Promise<void> {
-	let timerName: string = 'loadWorkspaceValidation';
-
-	console.time(timerName);
-	console.log('Validation data cache folder', validationCacheFolder);
-
-	if (!fs.existsSync(validationCacheFolder)) {
-		console.log(`Cache folder doesn't exists, nothing to load`);
-		return;
-	}
-	
-	for (const [folder, files] of workspaceFiles) {
-		await validateWorkspaceFolder(folder, {cacheOnly: true, queueCapacity: cacheLoadingQueueCapacity});
-	}
-
-	console.timeEnd(timerName);
-}
-
-async function validateWorkspaceCommand(args : any): Promise<void> {
+async function validateWorkspaceCommand(args : any = {}, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
 	let timerName: string = 'validateWorkspace';
 
 	console.time(timerName);
-	console.log('Validation data cache folder', validationCacheFolder);
+	console.log('Validation data cache folder', params.cacheFolder);
 
 	let folders = args?.folder ? [args?.folder] : workspaceFolders
 	
-	for (const folder of folders.map(f => f.fsPath)) {
+	for (const folder of folders.map(f => URI.parse(f.uri).fsPath)) {
 		console.log("Validating workspace folder", folder);
-		const cacheFolder = path.join(validationCacheFolder, path.basename(folder));
-		
-		if (!fs.existsSync(cacheFolder)) {
-			fs.mkdirSync(cacheFolder, {recursive: true});
-		}
-		
-		await validateWorkspaceFolder(folder);
+		await validateWorkspaceFolder(folder, params);
 	}
 
 	console.timeEnd(timerName);
@@ -1423,7 +1414,7 @@ async function validateWorkspaceCommand(args : any): Promise<void> {
 async function clearCachedValidationDataCommand(): Promise<void> {
 	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
 		fs.rmSync(
-			path.join(validationCacheFolder, path.basename(folder)),
+			path.join(defaultWorkspaceValidationParams.cacheFolder, path.basename(folder)),
 			{recursive: true}
 		);
 	}
@@ -1471,7 +1462,7 @@ async function loadCachedValidationData(validationCacheFile: string): Promise<Va
 	let parsedContent: ValidationResult
 
 	try {
-		fileContent = await promisify(fs.readFile)(validationCacheFile, {encoding : 'utf8'});
+		fileContent = await fs.promises.readFile(validationCacheFile, {encoding : 'utf8'});
 	}
 	catch (e) {
 		console.log(`Validation cache file not found, ${validationCacheFile}`, e);
@@ -1527,9 +1518,9 @@ async function collectWorkspaceFiles(dir : string) {
 	return result;
 }
 
-async function queueValidationJob(dir: string, file: string, cacheOnly: boolean) {
+async function execQueueValidationJob(dir: string, file: string, params: WorkspaceValidationParams): Promise<void> {
 	const cacheFileName: string = `${mangleFileUri(path.relative(dir, file))}.json`;
-	const cacheFilePath: string = path.join(validationCacheFolder, path.basename(dir), cacheFileName);
+	const cacheFilePath: string = params.saveCache ? path.join(params.cacheFolder, path.basename(dir), cacheFileName) : null;
 	const textDocument = TextDocument.create(
 		file,
 		'dascript',
@@ -1537,25 +1528,24 @@ async function queueValidationJob(dir: string, file: string, cacheOnly: boolean)
 		(await fs.promises.readFile(file)).toString()
 	);
 		
-	let validationResult = await loadCachedValidationData(cacheFilePath);
-	if (!isNil(validationResult) && cacheOnly) {
-		const settings = await getDocumentSettings(file);
-		const diagnostics = sendDiagnostics(validationResult, file, settings);
+	let validationResult = params.saveCache ? await loadCachedValidationData(cacheFilePath) : null;
+	if (isNil(validationResult)) {
+		await validateTextDocument(textDocument);
+
+		if (params.saveCache) {
+			await fs.promises.writeFile(cacheFilePath, JSON.stringify(validatingResults.get(file)));
+		}
+	}
+	else if (!isNil(validationResult)) {
+		const settings = await getDocumentSettings(textDocument.uri);
+		const diagnostics = sendDiagnostics(validationResult, textDocument.uri, settings);
 
 		storeValidationResult(settings, textDocument, validationResult, diagnostics);
 	}
-	else if (isNil(validationResult)) {
-		await validateTextDocument(textDocument);
-
-		validationResult = validatingResults.get(textDocument.uri);
-		if (!isNil(validationResult)) {
-			await fs.promises.writeFile(cacheFilePath, JSON.stringify(validationResult));
-		}
-	}
 }
 
-async function validateWorkspaceFolder(dir: string, extra : {cacheOnly?: boolean, queueCapacity?: number} = {cacheOnly: false, queueCapacity: validatingQueueCapacity}): Promise<void> {
-	let validatingQueue: ValidatingQueue = new ValidatingQueue(extra?.queueCapacity);
+async function validateWorkspaceFolder(dir: string, params : WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+	let validatingQueue: ValidatingQueue = new ValidatingQueue(params?.queueCapacity);
 	const token = `validation/${dir}`;
 
 	await connection.sendRequest("window/workDoneProgress/create", {token});
@@ -1565,8 +1555,7 @@ async function validateWorkspaceFolder(dir: string, extra : {cacheOnly?: boolean
 			token,
 			value: <WorkDoneProgressBegin>{
 				kind: "begin",
-				title: `Loading validation data`,
-				message: "Collecting files to validate...",
+				title: `Workspace validation`,
 				percentage: 0,
 			}
 		}
@@ -1578,6 +1567,14 @@ async function validateWorkspaceFolder(dir: string, extra : {cacheOnly?: boolean
 		range(1, files.length)
 	);
 
+	if (params?.saveCache) {
+		let cacheFolder = path.join(params.cacheFolder, path.basename(dir));
+		
+		if (!await fs.existsSync(cacheFolder)) {
+			await fs.promises.mkdir(cacheFolder, {recursive: true});
+		}
+	}
+
 	for (const [file, i] of filesRange) {
 		await connection.sendNotification(
 			"$/progress",
@@ -1585,31 +1582,19 @@ async function validateWorkspaceFolder(dir: string, extra : {cacheOnly?: boolean
 				token,
 				value: <WorkDoneProgressReport>{
 					kind: "report",
-					message: `${i}/${files.length} (${path.relative(dir, file)})`,
+					message: `${i}/${files.length} (${path.basename(dir)}/${path.relative(dir, file)})`,
 					percentage: (i / files.length) * 100,
 				}
 			}
 		);
-		await validatingQueue.enqueue(
-			file,
-			() => queueValidationJob(dir, file, extra?.cacheOnly)
-		);
+		await validatingQueue.enqueue(file, async () => await execQueueValidationJob(dir, file, params));
 	}
 
+	await validatingQueue.waitAll();
 	await connection.sendNotification(
 		"$/progress",
 		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
 	);
-}
-
-function getWorkspaceDir(file: string): string | null {
-	for (const folder of workspaceFolders) {
-		if (file.startsWith(folder.uri)) {
-			return folder.uri
-		}
-	}
-
-	return null;
 }
 
 async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
@@ -1740,7 +1725,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			return
 		}
 
-		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri) != null && documents.get(textDocument.uri)?.version !== textDocument.version) {
+		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
 			console.log('document version changed, ignoring result', textDocument.uri)
 			thisResolve()
 			return

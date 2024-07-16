@@ -29,4 +29,8 @@ export class ValidatingQueue {
             console.log(`[queue] Worker done. Queue size: ${this.workers.size}`);
         });
     }
+
+    public async waitAll() {
+        return await Promise.all(this.workers.values());
+    }
 }

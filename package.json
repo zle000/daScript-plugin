@@ -276,10 +276,16 @@
 					"default": false,
 					"description": "Scan/compile all files in workspace"
 				},
+				"dascript.project.storeCompilationData": {
+					"scope": "resource",
+					"type": "boolean",
+					"default": false,
+					"description": "Whether to store compilation data in cache folder (.dascript)"
+				},
 				"dascript.project.compilationConcurrency": {
 					"scope": "resource",
 					"type": "number",
-					"default": 5,
+					"default": 16,
 					"description": "Number of processes to use while validating (compiling) workspace"
 				},
 				"dascript.project.roots": {
@@ -359,8 +365,8 @@
 		],
 		"commands": [
 			{
-				"command": "dascript.revalidateWorkspace",
-				"title": "daScript: Revalidate workspace"
+				"command": "dascript.validateWorkspace",
+				"title": "daScript: Run workspace validation"
 			},
 			{
 				"command": "dascript.clearValidationCache",
