@@ -1403,7 +1403,7 @@ async function validateWorkspaceCommand(args : any = {}, params: WorkspaceValida
 
 	let folders = args?.folder ? [args?.folder] : workspaceFolders
 	
-	for (const folder of folders.map(f => URI.parse(f.uri).fsPath)) {
+	for (const folder of folders.map(f => f.fsPath)) {
 		console.log("Validating workspace folder", folder);
 		await validateWorkspaceFolder(folder, params);
 	}
@@ -1518,7 +1518,7 @@ async function collectWorkspaceFiles(dir : string) {
 	return result;
 }
 
-async function execQueueValidationJob(dir: string, file: string, params: WorkspaceValidationParams): Promise<void> {
+async function startQueueValidationJob(dir: string, file: string, params: WorkspaceValidationParams): Promise<void> {
 	const cacheFileName: string = `${mangleFileUri(path.relative(dir, file))}.json`;
 	const cacheFilePath: string = params.saveCache ? path.join(params.cacheFolder, path.basename(dir), cacheFileName) : null;
 	const textDocument = TextDocument.create(
@@ -1536,11 +1536,9 @@ async function execQueueValidationJob(dir: string, file: string, params: Workspa
 			await fs.promises.writeFile(cacheFilePath, JSON.stringify(validatingResults.get(file)));
 		}
 	}
-	else if (!isNil(validationResult)) {
+	else {
 		const settings = await getDocumentSettings(textDocument.uri);
-		const diagnostics = sendDiagnostics(validationResult, textDocument.uri, settings);
-
-		storeValidationResult(settings, textDocument, validationResult, diagnostics);
+		storeValidationResult(settings, textDocument, validationResult);
 	}
 }
 
@@ -1587,7 +1585,7 @@ async function validateWorkspaceFolder(dir: string, params : WorkspaceValidation
 				}
 			}
 		);
-		await validatingQueue.enqueue(file, async () => await execQueueValidationJob(dir, file, params));
+		await validatingQueue.enqueue(file, async () => await startQueueValidationJob(dir, file, params));
 	}
 
 	await validatingQueue.waitAll();
@@ -1832,7 +1830,7 @@ function baseTypeToCompletionItemKind(baseType: string) {
 	return CompletionItemKind.Struct
 }
 
-function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]>) {
+function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]> = new Map()) {
 	const uri = doc.uri
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
