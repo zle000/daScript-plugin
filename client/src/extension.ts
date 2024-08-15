@@ -10,6 +10,7 @@ import * as vscode from 'vscode'
 import {
 	LanguageClient, LanguageClientOptions, TransportKind
 } from 'vscode-languageclient/node'
+import { registerClientCommands } from './commands'
 
 let defaultClient: LanguageClient
 const clients: Map<string, LanguageClient> = new Map()
@@ -98,6 +99,9 @@ export function activate(context: ExtensionContext) {
 				outputChannel: outputChannel
 			}
 			const client = new LanguageClient('dascript', serverOptions, clientOptions)
+
+			registerClientCommands(context, client);
+
 			client.start()
 			clients.set(folder.uri.toString(), client)
 		}

@@ -19,6 +19,9 @@ import {
 	TextDocumentSyncKind,
 	TextDocuments,
 	TextEdit,
+	WorkDoneProgressBegin,
+	WorkDoneProgressEnd,
+	WorkDoneProgressReport,
 	WorkspaceEdit,
 	WorkspaceFolder,
 	createConnection,
@@ -26,6 +29,7 @@ import {
 } from 'vscode-languageserver/node'
 
 import {
+	DocumentUri,
 	TextDocument
 } from 'vscode-languageserver-textdocument'
 
@@ -36,7 +40,11 @@ import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
 import os = require('os')
-import { get } from 'http'
+import { promisify } from 'util'
+import { readdir } from 'fs'
+import { ValidatingQueue } from './validatingQueue'
+import { zip, range, isNil } from 'lodash'
+import { join } from 'path'
 
 enum DiagnosticsActionType {
 	UnusedReq = 0,
@@ -47,11 +55,18 @@ interface DiagnosticsAction {
 	data: LSPAny
 }
 
+interface WorkspaceValidationParams {
+	saveCache: boolean,
+	cacheFolder?: string,
+	queueCapacity: number,
+}
+
 // Creates the LSP connection
 const connection = createConnection(ProposedFeatures.all)
 
 // Create a manager for open text documents
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument)
+const workspaceFiles: Map<string, URI[]> = new Map<string, URI[]>();
 
 const validatingResults: Map<string/*uri*/, FixedValidationResult> = new Map()
 const autoFormatResult: Map<string/*uri*/, string> = new Map()
@@ -63,6 +78,37 @@ let hasConfigurationCapability = false
 let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
 
+const validationCacheFolder = './.dascript';
+const defaultWorkspaceValidationParams = <WorkspaceValidationParams>{
+	saveCache: false,
+	cacheFolder: './dascript',
+	queueCapacity: 16
+}
+
+const serverCommandHandlers: {[k in string]: (args: any) => Promise<void>} = {
+    'validateWorkspace': async args => await validateWorkspaceCommand(args),
+	'clearValidationCache': async _ => await clearCachedValidationDataCommand(),
+}
+
+
+function setWorkspaceValidationParams(config: any) {
+	defaultWorkspaceValidationParams.saveCache = config?.project?.storeCompilationData ?? defaultWorkspaceValidationParams.saveCache
+	defaultWorkspaceValidationParams.queueCapacity = config?.project?.compilationConcurrency ?? defaultWorkspaceValidationParams.queueCapacity
+}
+
+function mangleFileUri(uri: DocumentUri, version?: number): string {
+	const filePath = URI.parse(uri).fsPath;
+
+	const uriHash = stringHashCode(uri).toString(16);
+	const versionHash = version?.toString(16);
+	const filename = path.basename(filePath);
+
+	return [
+		uriHash,
+		versionHash,
+		filename
+	].filter(p => !!p).join("_");
+}
 
 function debugWsFolders() {
 	return workspaceFolders ? workspaceFolders.map(f => f.name).join(', ') : ''
@@ -1226,7 +1272,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	return res
 })
 
-connection.onInitialized(() => {
+connection.onInitialized(async () => {
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined)
@@ -1237,6 +1283,30 @@ connection.onInitialized(() => {
 			connection.console.log('Workspace folder change event received.')
 		})
 	}
+
+	let config = await connection.workspace.getConfiguration({
+		scopeUri: 'resource',
+		section: 'dascript'
+	})
+
+	setWorkspaceValidationParams(config);
+	
+	const workspaceFolderPaths = workspaceFolders.map(f => URI.parse(f.uri).fsPath)
+	for (const folder of workspaceFolderPaths) {
+		workspaceFiles.set(folder, await collectWorkspaceFiles(folder));
+	}
+	
+	if (config?.project?.scanWorkspace) {
+		validateWorkspaceCommand({}, defaultWorkspaceValidationParams);
+	}
+})
+
+connection.onExecuteCommand(async (params : any) => {
+	if (!serverCommandHandlers[params.command]) {
+		return;
+	}
+
+	serverCommandHandlers[params.command](params?.args);
 })
 
 let globalSettings = defaultSettings
@@ -1323,6 +1393,206 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 			return validatingResults.get(uri)
 		})
 	})
+}
+
+async function validateWorkspaceCommand(args : any = {}, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+	let timerName: string = 'validateWorkspace';
+
+	console.time(timerName);
+	console.log('Validation data cache folder', params.cacheFolder);
+
+	let folders = args?.folder ? [args?.folder] : workspaceFolders
+	
+	for (const folder of folders.map(f => f.fsPath)) {
+		console.log("Validating workspace folder", folder);
+		await validateWorkspaceFolder(folder, params);
+	}
+
+	console.timeEnd(timerName);
+}
+
+async function clearCachedValidationDataCommand(): Promise<void> {
+	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
+		fs.rmSync(
+			path.join(defaultWorkspaceValidationParams.cacheFolder, path.basename(folder)),
+			{recursive: true}
+		);
+	}
+}
+
+function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
+	const diagnostics: Map<string, Diagnostic[]> = new Map();
+	
+	for (const error of result.errors) {
+		error._range = AtToRange(error)
+		error._uri = AtToUri(error, file, settings, result.dasRoot)
+		if (error._uri.length === 0)
+			error._uri = file
+
+		let msg = error.what.trim()
+		if (error.extra?.length > 0 || error.fixme?.length > 0) {
+			var suffix = ''
+			if (error.extra?.length > 0)
+				suffix += error.extra.trim()
+			if (error.fixme?.length > 0)
+				suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
+
+			msg = `${msg}\n\n${suffix}`
+		}
+		const diag: Diagnostic = {
+			range: error._range,
+			message: msg,
+			code: error.cerr,
+			severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+		}
+		if (!diagnostics.has(error._uri))
+			diagnostics.set(error._uri, [])
+		diagnostics.get(error._uri).push(diag)
+	}
+
+	for (const [uri, diags] of diagnostics.entries()) {
+		connection.sendDiagnostics({ uri: uri, diagnostics: diags })
+	}
+
+	return diagnostics;
+}
+
+async function loadCachedValidationData(validationCacheFile: string): Promise<ValidationResult | null> {
+	let fileContent: string;
+	let parsedContent: ValidationResult
+
+	try {
+		fileContent = await fs.promises.readFile(validationCacheFile, {encoding : 'utf8'});
+	}
+	catch (e) {
+		console.log(`Validation cache file not found, ${validationCacheFile}`, e);
+		return null;
+	}
+
+	try {
+		parsedContent = JSON.parse(fileContent) as ValidationResult;
+	}
+	catch (e) {
+		console.log('Failed to parse', validationCacheFile);
+		return null;
+	}
+
+	console.log(`Found validation cache file, ${validationCacheFile}`);
+
+	return parsedContent;
+}
+
+async function collectWorkspaceFiles(dir : string) {
+	const ignoredFolders: string[] = [".git", ".github"];
+
+	let foldersToVisit: string[] = [dir];
+	let result: URI[] = [];
+
+	while (foldersToVisit.length !== 0) {
+		const files = await promisify(readdir)(foldersToVisit[0]);
+		const fileStats = await Promise.all(files
+			.map(file => fs.promises.stat(join(foldersToVisit[0], file)))
+		)
+
+		for (let i = 0; i < files.length; i++) {
+			const path = join(foldersToVisit[0], files[i]);
+			const isIgnored: boolean = ignoredFolders
+				.filter(ignored => path.endsWith(ignored))
+				.length !== 0
+
+			if (isIgnored) {
+				continue;
+			}
+
+			if (fileStats[i].isDirectory()) {
+				foldersToVisit.push(path);
+			}
+			else if (path.endsWith(".das")) {
+				result.push(URI.parse(path));
+			}
+		}
+
+		foldersToVisit.shift();
+	}
+
+	return result;
+}
+
+async function startQueueValidationJob(dir: string, file: string, params: WorkspaceValidationParams): Promise<void> {
+	const cacheFileName: string = `${mangleFileUri(path.relative(dir, file))}.json`;
+	const cacheFilePath: string = params.saveCache ? path.join(params.cacheFolder, path.basename(dir), cacheFileName) : null;
+	const textDocument = TextDocument.create(
+		file,
+		'dascript',
+		1,
+		(await fs.promises.readFile(file)).toString()
+	);
+		
+	let validationResult = params.saveCache ? await loadCachedValidationData(cacheFilePath) : null;
+	if (isNil(validationResult)) {
+		await validateTextDocument(textDocument);
+
+		if (params.saveCache) {
+			await fs.promises.writeFile(cacheFilePath, JSON.stringify(validatingResults.get(file)));
+		}
+	}
+	else {
+		const settings = await getDocumentSettings(textDocument.uri);
+		storeValidationResult(settings, textDocument, validationResult);
+	}
+}
+
+async function validateWorkspaceFolder(dir: string, params : WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+	let validatingQueue: ValidatingQueue = new ValidatingQueue(params?.queueCapacity);
+	const token = `validation/${dir}`;
+
+	await connection.sendRequest("window/workDoneProgress/create", {token});
+	await connection.sendNotification(
+		"$/progress",
+		{
+			token,
+			value: <WorkDoneProgressBegin>{
+				kind: "begin",
+				title: `Workspace validation`,
+				percentage: 0,
+			}
+		}
+	);
+
+	const files = workspaceFiles.get(dir)
+	const filesRange = zip(
+		files.map(file => file.fsPath),
+		range(1, files.length)
+	);
+
+	if (params?.saveCache) {
+		let cacheFolder = path.join(params.cacheFolder, path.basename(dir));
+		
+		if (!await fs.existsSync(cacheFolder)) {
+			await fs.promises.mkdir(cacheFolder, {recursive: true});
+		}
+	}
+
+	for (const [file, i] of filesRange) {
+		await connection.sendNotification(
+			"$/progress",
+			{
+				token,
+				value: <WorkDoneProgressReport>{
+					kind: "report",
+					message: `${i}/${files.length} (${path.basename(dir)}/${path.relative(dir, file)})`,
+					percentage: (i / files.length) * 100,
+				}
+			}
+		);
+		await validatingQueue.enqueue(file, async () => await startQueueValidationJob(dir, file, params));
+	}
+
+	await validatingQueue.waitAll();
+	await connection.sendNotification(
+		"$/progress",
+		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
+	);
 }
 
 async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
@@ -1499,6 +1769,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			}
 			console.time('storeValidationResult')
 			storeValidationResult(settings, textDocument, result, diagnostics)
+
 			console.timeEnd('storeValidationResult')
 		} else { // result == null
 			if (!diagnostics.has(textDocument.uri))
@@ -1559,19 +1830,18 @@ function baseTypeToCompletionItemKind(baseType: string) {
 	return CompletionItemKind.Struct
 }
 
-function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]>) {
+function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]> = new Map()) {
 	const uri = doc.uri
 	const fileVersion = doc.version
 	console.log('storeValidationResult', uri, 'version', fileVersion)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map(), }
-	if (res.errors.length > 0) {
+	if (res.errors.length > 0 && validatingResults.has(uri)) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
-		if (prev) {
-			fixedResults.completion = prev.completion
-			fixedResults.completionItems = prev.completionItems
-			fixedResults.tokens = prev.tokens
-		}
+
+		fixedResults.completion = prev.completion
+		fixedResults.completionItems = prev.completionItems
+		fixedResults.tokens = prev.tokens
 	}
 	else {
 		let globalCompletionRes = uri != globalCompletionFile.uri ? validatingResults.get(globalCompletionFile.uri) : null
@@ -2148,7 +2418,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 	}
 
-	validatingResults.set(uri, fixedResults)
+	validatingResults.set(uri, fixedResults);
 
 	connection.languages.inlayHint.refresh()
 }
