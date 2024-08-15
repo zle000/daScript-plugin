@@ -1393,7 +1393,7 @@ class AstData : AstVisitor
         if expr.at.line == 0u && expr.at.column == 0u
             return
         let typ = expr._type != null ? describe([decl=expr._type, extra=true]) : ""
-        var name = describe(ExpressionPtr(expr))
+        var name = describe(expr)
         var token <- new [[AstToken
             name = name,
             desc = "constant : {typ} = {name}",
