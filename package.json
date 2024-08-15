@@ -4,7 +4,7 @@
 	"description": "daScript language support",
 	"author": "Dmitri Granetchi",
 	"license": "MIT",
-	"version": "1.0.38",
+	"version": "1.0.41",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/profelis/daScript-plugin"
@@ -154,6 +154,21 @@
 								"type": "number",
 								"description": "Max length of preview values",
 								"default": 50
+							},
+							"maxChildrenCount": {
+								"type": "number",
+								"description": "Max number of children to show in variables view (-1 - unlimited)",
+								"default": 500
+							},
+							"collectAllGlobals": {
+								"type": "boolean",
+								"description": "Collect all global variables",
+								"default": false
+							},
+							"steppingDebugger": {
+								"type": "boolean",
+								"description": "Use stepping debugger",
+								"default": false
 							},
 							"paths": {
 								"type": "array",
