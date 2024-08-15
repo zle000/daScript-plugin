@@ -43,7 +43,6 @@ import os = require('os')
 import { promisify } from 'util'
 import { readdir } from 'fs'
 import { ValidatingQueue } from './validatingQueue'
-import { zip, range, isNil } from 'lodash'
 import { join } from 'path'
 
 enum DiagnosticsActionType {
@@ -85,8 +84,8 @@ const defaultWorkspaceValidationParams = <WorkspaceValidationParams>{
 	queueCapacity: 16
 }
 
-const serverCommandHandlers: {[k in string]: (args: any) => Promise<void>} = {
-    'validateWorkspace': async args => await validateWorkspaceCommand(args),
+const serverCommandHandlers: { [k in string]: (args: any) => Promise<void> } = {
+	'validateWorkspace': async args => await validateWorkspaceCommand(args),
 	'clearValidationCache': async _ => await clearCachedValidationDataCommand(),
 }
 
@@ -1298,18 +1297,18 @@ connection.onInitialized(async () => {
 	})
 
 	setWorkspaceValidationParams(config);
-	
+
 	const workspaceFolderPaths = workspaceFolders.map(f => URI.parse(f.uri).fsPath)
 	for (const folder of workspaceFolderPaths) {
 		workspaceFiles.set(folder, await collectWorkspaceFiles(folder));
 	}
-	
+
 	if (config?.project?.scanWorkspace) {
 		validateWorkspaceCommand({}, defaultWorkspaceValidationParams);
 	}
 })
 
-connection.onExecuteCommand(async (params : any) => {
+connection.onExecuteCommand(async (params: any) => {
 	if (!serverCommandHandlers[params.command]) {
 		return;
 	}
@@ -1403,14 +1402,14 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
-async function validateWorkspaceCommand(args : any = {}, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+async function validateWorkspaceCommand(args: any = {}, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
 	let timerName: string = 'validateWorkspace';
 
 	console.time(timerName);
 	console.log('Validation data cache folder', params.cacheFolder);
 
 	let folders = args?.folder ? [args?.folder] : workspaceFolders
-	
+
 	for (const folder of folders.map(f => f.fsPath)) {
 		console.log("Validating workspace folder", folder);
 		await validateWorkspaceFolder(folder, params);
@@ -1423,14 +1422,14 @@ async function clearCachedValidationDataCommand(): Promise<void> {
 	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
 		fs.rmSync(
 			path.join(defaultWorkspaceValidationParams.cacheFolder, path.basename(folder)),
-			{recursive: true}
+			{ recursive: true }
 		);
 	}
 }
 
 function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
 	const diagnostics: Map<string, Diagnostic[]> = new Map();
-	
+
 	for (const error of result.errors) {
 		error._range = AtToRange(error)
 		error._uri = AtToUri(error, file, settings, result.dasRoot)
@@ -1470,7 +1469,7 @@ async function loadCachedValidationData(validationCacheFile: string): Promise<Va
 	let parsedContent: ValidationResult
 
 	try {
-		fileContent = await fs.promises.readFile(validationCacheFile, {encoding : 'utf8'});
+		fileContent = await fs.promises.readFile(validationCacheFile, { encoding: 'utf8' });
 	}
 	catch (e) {
 		console.log(`Validation cache file not found, ${validationCacheFile}`, e);
@@ -1490,7 +1489,7 @@ async function loadCachedValidationData(validationCacheFile: string): Promise<Va
 	return parsedContent;
 }
 
-async function collectWorkspaceFiles(dir : string) {
+async function collectWorkspaceFiles(dir: string) {
 	const ignoredFolders: string[] = [".git", ".github"];
 
 	let foldersToVisit: string[] = [dir];
@@ -1535,9 +1534,9 @@ async function startQueueValidationJob(dir: string, file: string, params: Worksp
 		1,
 		(await fs.promises.readFile(file)).toString()
 	);
-		
+
 	let validationResult = params.saveCache ? await loadCachedValidationData(cacheFilePath) : null;
-	if (isNil(validationResult)) {
+	if (!validationResult) {
 		await validateTextDocument(textDocument);
 
 		if (params.saveCache) {
@@ -1550,11 +1549,11 @@ async function startQueueValidationJob(dir: string, file: string, params: Worksp
 	}
 }
 
-async function validateWorkspaceFolder(dir: string, params : WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+async function validateWorkspaceFolder(dir: string, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
 	let validatingQueue: ValidatingQueue = new ValidatingQueue(params?.queueCapacity);
 	const token = `validation/${dir}`;
 
-	await connection.sendRequest("window/workDoneProgress/create", {token});
+	await connection.sendRequest("window/workDoneProgress/create", { token });
 	await connection.sendNotification(
 		"$/progress",
 		{
@@ -1568,38 +1567,36 @@ async function validateWorkspaceFolder(dir: string, params : WorkspaceValidation
 	);
 
 	const files = workspaceFiles.get(dir)
-	const filesRange = zip(
-		files.map(file => file.fsPath),
-		range(1, files.length)
-	);
 
 	if (params?.saveCache) {
 		let cacheFolder = path.join(params.cacheFolder, path.basename(dir));
-		
+
 		if (!await fs.existsSync(cacheFolder)) {
-			await fs.promises.mkdir(cacheFolder, {recursive: true});
+			await fs.promises.mkdir(cacheFolder, { recursive: true });
 		}
 	}
 
-	for (const [file, i] of filesRange) {
+	let i = 1
+	for (const file of files) {
 		await connection.sendNotification(
 			"$/progress",
 			{
 				token,
 				value: <WorkDoneProgressReport>{
 					kind: "report",
-					message: `${i}/${files.length} (${path.basename(dir)}/${path.relative(dir, file)})`,
+					message: `${i}/${files.length} (${path.basename(dir)}/${path.relative(dir, file.fsPath)})`,
 					percentage: (i / files.length) * 100,
 				}
 			}
 		);
-		await validatingQueue.enqueue(file, async () => await startQueueValidationJob(dir, file, params));
+		await validatingQueue.enqueue(file.fsPath, async () => await startQueueValidationJob(dir, file.fsPath, params));
+		i++
 	}
 
 	await validatingQueue.waitAll();
 	await connection.sendNotification(
 		"$/progress",
-		{token, value: <WorkDoneProgressEnd>{kind: "end"}}
+		{ token, value: <WorkDoneProgressEnd>{ kind: "end" } }
 	);
 }
 
@@ -2224,6 +2221,14 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 						addUsedModule(fn.origMod)
 					}
 				}
+				if (globalCompletion) {
+					for (const fn of globalCompletion.functions) {
+						if (fn.name === token.name && fn.mod === token.mod) {
+							addUsedModule(fn.mod)
+							addUsedModule(fn.origMod)
+						}
+					}
+				}
 			}
 			//fallback to type decl
 			if (token.kind != TokenKind.Func && token.kind != TokenKind.ExprDebug && token.kind != TokenKind.ExprAddr && token.tdk.length > 0) {
@@ -2241,7 +2246,6 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				f.name = f.name.substring(8)
 			}
 			else {
-
 				let prefixIdx = f.name.indexOf('`')
 				if (prefixIdx >= 0) {
 					if (prefixIdx == 0 || usedModules.has(f.name.substring(0, prefixIdx)))
