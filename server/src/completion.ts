@@ -172,6 +172,14 @@ export function findTypeDecl(tdk: string, cr: CompletionResult, cr2: CompletionR
     return res
 }
 
+export function findFunction(name: string, mod: string, cr: CompletionResult, cr2: CompletionResult): CompletionFunction {
+    let cond = f => f.name === name && f.mod === mod
+    let res = cr.functions.find(cond)
+    if (!res && cr2)
+        res = cr2.functions.find(cond)
+    return res
+}
+
 export function describeToken(tok: DasToken, cr: CompletionResult, cr2: CompletionResult) {
     // cursed code, but it works
     let res = ''
