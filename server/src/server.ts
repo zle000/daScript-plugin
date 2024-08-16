@@ -1490,8 +1490,6 @@ async function loadCachedValidationData(validationCacheFile: string): Promise<Va
 }
 
 async function collectWorkspaceFiles(dir: string) {
-	const ignoredFolders: string[] = [".git", ".github"];
-
 	let foldersToVisit: string[] = [dir];
 	let result: URI[] = [];
 
@@ -1502,14 +1500,10 @@ async function collectWorkspaceFiles(dir: string) {
 		)
 
 		for (let i = 0; i < files.length; i++) {
-			const path = join(foldersToVisit[0], files[i]);
-			const isIgnored: boolean = ignoredFolders
-				.filter(ignored => path.endsWith(ignored))
-				.length !== 0
-
-			if (isIgnored) {
+			if (files[i].startsWith('.')) {
 				continue;
 			}
+			const path = join(foldersToVisit[0], files[i]);
 
 			if (fileStats[i].isDirectory()) {
 				foldersToVisit.push(path);
