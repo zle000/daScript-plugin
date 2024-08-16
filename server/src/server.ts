@@ -1408,9 +1408,9 @@ async function validateWorkspaceCommand(args: any = {}, params: WorkspaceValidat
 	console.time(timerName);
 	console.log('Validation data cache folder', params.cacheFolder);
 
-	let folders = args?.folder ? [args?.folder] : workspaceFolders
+	let folders = args?.folder ? [<WorkspaceFolder>{ uri: args?.folder, name: '' }] : workspaceFolders
 
-	for (const folder of folders.map(f => f.fsPath)) {
+	for (const folder of folders.map(f => URI.parse(f.uri).fsPath)) {
 		console.log("Validating workspace folder", folder);
 		await validateWorkspaceFolder(folder, params);
 	}
