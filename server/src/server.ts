@@ -1537,6 +1537,7 @@ async function startQueueValidationJob(dir: string, file: string, params: Worksp
 }
 
 async function validateWorkspaceFolder(dir: string, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+	return; // TODO: temporary disable scanning
 	let validatingQueue: ValidatingQueue = new ValidatingQueue(params?.queueCapacity);
 	const token = `validation/${dir}`;
 
