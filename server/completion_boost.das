@@ -242,6 +242,9 @@ struct CompletionTypeDecl : CompletionAt
     mod : string // enum name or struct name
     tdk1 : string
     tdk2 : string
+    canCopy : bool
+    canMove : bool
+    canClone : bool
 
 let skipTypeDescSize = [[auto[] Type none; Type autoinfer; Type fakeLineInfo; Type fakeContext; Type alias; Type anyArgument]]
 
@@ -253,6 +256,9 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
     res.typeDecls[tdk] = foundIdx
     // if t.argNames |> length() > 0
     var td <- [[CompletionTypeDecl() tdk=tdk, baseType=BaseTypeString(t.baseType)]]
+    td.canCopy = t.canCopy
+    td.canMove = t.canMove
+    td.canClone = t.canClone
     let totalArgs = min(length(t.argNames), length(t.argTypes))
     for idx, argN, argT in count(), t.argNames, t.argTypes
         var tf <- [[CompletionTypeDeclField() name=length(argN) > 0 ? "{argN}" : "_{idx}"]]

@@ -1,5 +1,5 @@
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { CompletionItem, CompletionItemKind, Location, Position, Range, integer } from 'vscode-languageserver/node'
+import { CompletionItem, CompletionItemKind, Location, Position, Range, WorkspaceFolder, integer } from 'vscode-languageserver/node'
 import { URI } from 'vscode-uri'
 import { DasSettings } from './dasSettings'
 import fs = require('fs')
@@ -156,12 +156,32 @@ export function findEnum(name: string, mod: string, cr: CompletionResult, cr2: C
     return res
 }
 
+export function findTypeDefNoMod(name: string, cr: CompletionResult, cr2: CompletionResult): CompletionTypeDef {
+    let cond = t => t.name === name
+    let res = cr.typeDefs.find(cond)
+    if (!res && cr2)
+        res = cr2.typeDefs.find(cond)
+    return res
+}
+
 export function findTypeDef(name: string, mod: string, cr: CompletionResult, cr2: CompletionResult): CompletionTypeDef {
     let cond = t => t.name === name && t.mod === mod
     let res = cr.typeDefs.find(cond)
     if (!res && cr2)
         res = cr2.typeDefs.find(cond)
     return res
+}
+
+export function typedeclAssignOperator(t: CompletionTypeDecl): string {
+    if (t == null)
+        return '='
+    if (t.canCopy)
+        return '='
+    if (t.canMove)
+        return '<-'
+    if (t.canClone)
+        return ':='
+    return '='
 }
 
 export function findTypeDecl(tdk: string, cr: CompletionResult, cr2: CompletionResult): CompletionTypeDecl {
@@ -402,6 +422,9 @@ export interface CompletionTypeDecl extends CompletionAt {
     mod: string // enum or struct mod
     tdk1: string
     tdk2: string
+    canCopy: boolean
+    canMove: boolean
+    canClone: boolean
 }
 
 export function typeDeclDetail(td: CompletionTypeDecl) {
@@ -565,11 +588,13 @@ export function typeDeclDocs(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
     return res
 }
 
-export const FIELD_SORT = '0'
-export const PROPERTY_SORT = '1'
-export const METHOD_SORT = '2'
-export const EXTENSION_FN_SORT = '3'
-export const OPERATOR_SORT = '4'
+export const BEFORE_ALL_SORT = '0'
+export const FIELD_SORT = '1'
+export const PROPERTY_SORT = '2'
+export const METHOD_SORT = '3'
+export const EXTENSION_FN_SORT = '4'
+export const OPERATOR_SORT = '5'
+export const MODULE_SORT = '6'
 
 function addUniqueCompletionItem(res: CompletionItem[], c: CompletionItem) {
     if (!res.some(ci => ci.label === c.label))
@@ -721,6 +746,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
             const c = CompletionItem.create('invoke')
             c.kind = CompletionItemKind.Keyword
             c.insertText = ' |> invoke('
+            c.sortText = EXTENSION_FN_SORT
             addUniqueCompletionItem(res, c)
         }
     }
@@ -884,7 +910,7 @@ export interface ValidationResult {
     requirements: ModuleRequirement[]
 }
 
-export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string, cache: Map<string, string> = null) {
+export function AtToUri(at: CompletionAt, filePath: string, settings: DasSettings, ws: WorkspaceFolder[], dasRoot: string, cache: Map<string, string> = null) {
     if (at.file?.length == 0)
         return ''
 
@@ -892,7 +918,7 @@ export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSett
         return cache.get(at.file)
     }
 
-    const res = AtToUri_(at, documentUri, settings, dasRoot)
+    const res = AtToUri_(at, filePath, settings, ws, dasRoot)
     if (cache) {
         cache.set(at.file, res)
     }
@@ -901,7 +927,7 @@ export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSett
 
 var AtToUriErrors = 3
 
-function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string) {
+function AtToUri_(at: CompletionAt, filePath: string, settings: DasSettings, ws: WorkspaceFolder[], dasRoot: string) {
     // DON'T DO THIS
     // if (fs.existsSync(at.file)) {
     //     return URI.file(at.file).toString()
@@ -912,6 +938,19 @@ function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, 
         if (fs.existsSync(full)) {
             return URI.file(full).toString()
         }
+    }
+
+    for (const w of ws) {
+        const full = path.join(URI.parse(w.uri).fsPath, at.file)
+        if (fs.existsSync(full)) {
+            return URI.file(full).toString()
+        }
+    }
+
+    const relativeDir = path.dirname(filePath)
+    const full = path.join(relativeDir, at.file)
+    if (fs.existsSync(full)) {
+        return URI.file(full).toString()
     }
 
     for (const dir of ['daslib', 'src/builtin']) {
@@ -928,6 +967,11 @@ function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, 
             const full = path.join(dir, at.file)
             paths.push(full)
         }
+        for (const w of ws) {
+            const full = path.join(URI.parse(w.uri).fsPath, at.file)
+            paths.push(full)
+        }
+        paths.push(`${filePath} (${relativeDir})`)
         paths.push(path.join(dasRoot, 'daslib', at.file))
         paths.push(path.join(dasRoot, 'src/builtin', at.file))
         console.log("AtToUri_", paths)
@@ -1018,7 +1062,7 @@ export function isPositionEqual(a: Position, b: Position) {
     return a.line == b.line && a.character == b.character
 }
 
-export function moduleTdk(tdk: string): string {
+export function tdkModule(tdk: string): string {
     const till = tdk.indexOf("<")
     const skip = tdk.indexOf("::")
     if (skip > 0 && (till < 0 || skip < till))
@@ -1026,7 +1070,7 @@ export function moduleTdk(tdk: string): string {
     return ""
 }
 
-export function shortTdk(tdk: string): string {
+export function tdkName(tdk: string): string {
     const till = tdk.indexOf("<")
     const skip = tdk.indexOf("::")
     if (skip > 0 && (till < 0 || skip < till))

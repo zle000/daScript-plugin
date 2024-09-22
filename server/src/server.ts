@@ -35,7 +35,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BaseType, Brackets, CompletionAt, CompletionResult, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, moduleTdk, posInRange, primitiveBaseType, rangeCenter, rangeLength, shortTdk, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, tdkModule, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -254,6 +254,60 @@ interface CallChain {
 	brackets: Brackets
 }
 
+function findStructCtor(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean, recursion: number): string {
+	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
+	let i = line.length - 1
+	let numO = 0 // ( )
+	let numE = 0 // { }
+	let numD = 0 // [ ]
+	for (; i >= 0; i--) {
+		const ch = line[i]
+		if (ch === ')')
+			numO++
+		else if (ch === '(')
+			numO--
+		else if (ch === ']')
+			numD++
+		else if (ch === '[')
+			numD--
+		else if (ch === '}')
+			numE++
+		else if (ch === '{')
+			numE--
+		if ((ch == '(') && numO == -1 && numE == 0 && numD == 0) {
+			let key = ''
+			for (let j = i - 1; j >= 0; j--) {
+				const ch = line[j]
+				if (key == '' && isSpaceChar(ch))
+					continue
+				if (isValidIdChar(ch))
+					key = ch + key
+				else
+					break
+			}
+			if (key.length > 0) {
+				return key
+			}
+		}
+		if ((ch == '[') && numO == 0 && numE == 0 && numD == -2) {
+			let key = ''
+			for (let j = i + 2; j < line.length - 1; j++) {
+				const ch = line[j]
+				if (key == '' && isSpaceChar(ch))
+					continue
+				if (isValidIdChar(ch))
+					key += ch
+				else
+					break
+			}
+			if (key.length > 0) {
+				return key
+			}
+		}
+	}
+	return ""
+}
+
 function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
 	return findCallChain_(doc, fileData, pos, forAutocompletion, 0)
 }
@@ -384,6 +438,11 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 				del = Delimiter.ColonColon
 				break
 			}
+			// else if (line[i] == ',')
+			// {
+			// 	i--
+			// 	continue // lets try to find the next delimiter
+			// }
 			else
 				break
 		}
@@ -751,8 +810,9 @@ connection.onCompletion(async (textDocumentPosition) => {
 		return getGlobalCompletionItems()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
 	const res = new Array<Map<string, CompletionItem>>()
+	let mergeWithFileCompletion = false
+	const globalCompletion = getGlobalCompletion()
 	if (callChain.length > 0) {
-		const globalCompletion = getGlobalCompletion()
 		const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
 		const replaceStart = call.objRange.end
 		for (let completionTdk of call.tdks) {
@@ -809,7 +869,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 			}
 		}
 		if (call.delimiter == Delimiter.ColonColon && call.obj.length > 0) {
-			let enumCb = (en) => {
+			let enumCb = (en: CompletionEnum) => {
 				if (en.mod == call.obj) {
 					const c = CompletionItem.create(en.name)
 					c.detail = enumDetail(en)
@@ -866,10 +926,38 @@ connection.onCompletion(async (textDocumentPosition) => {
 				globalCompletion.typeDefs.forEach(tdCb)
 		}
 	}
+	if (res.length == 0) {
+		const structCtor = findStructCtor(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true, 0)
+		if (structCtor.length > 0) {
+			let td = findTypeDefNoMod(structCtor, fileData.completion, globalCompletion)
+			let tdName = td ? tdkName(td.tdk) : null
+			let structCb = (st: CompletionStruct) => {
+				if (st.name == structCtor || (tdName && tdName == st.name)) {
+					for (const f of st.fields) {
+						const c = CompletionItem.create(f.name)
+						const td = findTypeDecl(f.tdk, fileData.completion, globalCompletion)
+						c.insertText = `${f.name} ${typedeclAssignOperator(td)} `
+						c.detail = structFieldDetail(f)
+						c.documentation = structFieldDocs(f, st)
+						c.kind = CompletionItemKind.Field
+						c.sortText = BEFORE_ALL_SORT
+						addCompletionItem(res, c)
+					}
+					mergeWithFileCompletion = true
+				}
+			}
+			fileData.completion.structs.forEach(structCb)
+			if (globalCompletion)
+				globalCompletion.structs.forEach(structCb)
+		}
+	}
 	if (res.length > 0) {
 		var items: CompletionItem[] = []
 		for (const m of res) {
 			items.push(...m.values())
+		}
+		if (mergeWithFileCompletion) {
+			items.push(...fileData.completionItems)
 		}
 		return items
 	}
@@ -1244,7 +1332,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 					continue
 				// sometimes typedecl cover whole let expression, ignore it case
 				if (nextToken.kind != TokenKind.Typedecl || isRangeLengthZero(nextToken._range) || isPositionLessOrEqual(nextToken._range.start, token._range.start)) {
-					const short = shortTdk(token.tdk)
+					const short = tdkName(token.tdk)
 					res.push({
 						label: `: ${short}`,
 						position: token._range.end,
@@ -1264,7 +1352,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 					}
 				}
 				if (nextToken.kind != TokenKind.Typedecl || isRangeLengthZero(nextToken._range)) {
-					const short = shortTdk(token.tdk)
+					const short = tdkName(token.tdk)
 					res.push({
 						label: `: ${short}`,
 						position: closedBracketPos(doc, token._range.end),
@@ -1432,42 +1520,42 @@ async function clearCachedValidationDataCommand(): Promise<void> {
 	}
 }
 
-function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
-	const diagnostics: Map<string, Diagnostic[]> = new Map();
+// function sendDiagnostics(result: ValidationResult, file: string, settings: DasSettings): Map<string, Diagnostic[]> {
+// 	const diagnostics: Map<string, Diagnostic[]> = new Map();
 
-	for (const error of result.errors) {
-		error._range = AtToRange(error)
-		error._uri = AtToUri(error, file, settings, result.dasRoot)
-		if (error._uri.length === 0)
-			error._uri = file
+// 	for (const error of result.errors) {
+// 		error._range = AtToRange(error)
+// 		error._uri = AtToUri(error, file, settings, workspaceFolders, result.dasRoot)
+// 		if (error._uri.length === 0)
+// 			error._uri = file
 
-		let msg = error.what.trim()
-		if (error.extra?.length > 0 || error.fixme?.length > 0) {
-			var suffix = ''
-			if (error.extra?.length > 0)
-				suffix += error.extra.trim()
-			if (error.fixme?.length > 0)
-				suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
+// 		let msg = error.what.trim()
+// 		if (error.extra?.length > 0 || error.fixme?.length > 0) {
+// 			var suffix = ''
+// 			if (error.extra?.length > 0)
+// 				suffix += error.extra.trim()
+// 			if (error.fixme?.length > 0)
+// 				suffix += (suffix.length > 0 ? '\n' : '') + error.fixme.trim()
 
-			msg = `${msg}\n\n${suffix}`
-		}
-		const diag: Diagnostic = {
-			range: error._range,
-			message: msg,
-			code: error.cerr,
-			severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
-		}
-		if (!diagnostics.has(error._uri))
-			diagnostics.set(error._uri, [])
-		diagnostics.get(error._uri).push(diag)
-	}
+// 			msg = `${msg}\n\n${suffix}`
+// 		}
+// 		const diag: Diagnostic = {
+// 			range: error._range,
+// 			message: msg,
+// 			code: error.cerr,
+// 			severity: error.level === 0 ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+// 		}
+// 		if (!diagnostics.has(error._uri))
+// 			diagnostics.set(error._uri, [])
+// 		diagnostics.get(error._uri).push(diag)
+// 	}
 
-	for (const [uri, diags] of diagnostics.entries()) {
-		connection.sendDiagnostics({ uri: uri, diagnostics: diags })
-	}
+// 	for (const [uri, diags] of diagnostics.entries()) {
+// 		connection.sendDiagnostics({ uri: uri, diagnostics: diags })
+// 	}
 
-	return diagnostics;
-}
+// 	return diagnostics;
+// }
 
 async function loadCachedValidationData(validationCacheFile: string): Promise<ValidationResult | null> {
 	let fileContent: string;
@@ -1747,7 +1835,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 		if (result != null) {
 			for (const error of result.errors) {
 				error._range = AtToRange(error)
-				error._uri = AtToUri(error, textDocument.uri, settings, result.dasRoot)
+				error._uri = AtToUri(error, filePath, settings, workspaceFolders, result.dasRoot)
 				if (error._uri.length === 0)
 					error._uri = textDocument.uri
 
@@ -1837,6 +1925,7 @@ function baseTypeToCompletionItemKind(baseType: string) {
 function storeValidationResult(settings: DasSettings, doc: TextDocument, res: ValidationResult, diagnostics: Map<string, Diagnostic[]> = new Map()) {
 	const uri = doc.uri
 	const fileVersion = doc.version
+	const filePath = URI.parse(doc.uri).fsPath
 	console.log('storeValidationResult', uri, 'version', fileVersion)
 	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map(), }
 	if (res.errors.length > 0 && validatingResults.has(uri)) {
@@ -1868,6 +1957,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					kind: CompletionItemKind.Module,
 					detail: `module ${name}`,
 					documentation: `module ${name}\n${at.file}`,
+					sortText: MODULE_SORT,
 				})
 
 			}
@@ -1876,34 +1966,37 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 		for (const e of res.completion.enums) {
 			e._range = AtToRange(e)
-			e._uri = AtToUri(e, uri, settings, res.dasRoot, fixedResults.filesCache)
+			e._uri = AtToUri(e, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(completionMap, {
 				label: e.name,
 				kind: CompletionItemKind.Enum,
 				detail: enumDetail(e),
 				documentation: enumDocs(e),
+				sortText: MODULE_SORT,
 			})
 			addMod(e.mod, e)
 			for (const ev of e.values) {
 				ev._range = AtToRange(ev)
-				ev._uri = AtToUri(ev, uri, settings, res.dasRoot, fixedResults.filesCache)
+				ev._uri = AtToUri(ev, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 				addCompletionItem(completionMap, {
 					label: ev.name,
 					kind: CompletionItemKind.EnumMember,
 					detail: enumValueDetail(ev),
 					documentation: enumValueDocs(ev, e),
+					sortText: MODULE_SORT,
 				})
 			}
 		}
 		for (const s of res.completion.structs) {
 			s.column++ // magic number to fix column
 			s._range = AtToRange(s)
-			s._uri = AtToUri(s, uri, settings, res.dasRoot, fixedResults.filesCache)
+			s._uri = AtToUri(s, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(completionMap, {
 				label: s.name,
 				kind: s.isClass ? CompletionItemKind.Class : CompletionItemKind.Struct,
 				detail: structDetail(s),
 				documentation: structDocs(s),
+				sortText: MODULE_SORT,
 			})
 			addMod(s.mod, s)
 			if (s._uri == uri && s.parentMod.length > 0)
@@ -1912,23 +2005,25 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				// TODO: search for the field end using textDocument.getText()
 				// sf.columnEnd += sf.tdk.length + 1 // 1 char for ':'
 				sf._range = AtToRange(sf)
-				sf._uri = AtToUri(sf, uri, settings, res.dasRoot, fixedResults.filesCache)
+				sf._uri = AtToUri(sf, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 				addCompletionItem(completionMap, {
 					label: sf.name,
 					kind: CompletionItemKind.Field,
 					detail: structFieldDetail(sf),
 					documentation: structFieldDocs(sf, s),
+					sortText: MODULE_SORT,
 				})
 			}
 		}
 		for (const t of res.completion.typeDecls) {
 			t._range = AtToRange(t)
-			t._uri = AtToUri(t, uri, settings, res.dasRoot, fixedResults.filesCache)
+			t._uri = AtToUri(t, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(completionMap, {
 				label: t.tdk,
 				kind: baseTypeToCompletionItemKind(t.baseType),
 				detail: typeDeclDetail(t),
 				documentation: typeDeclDocs(t, res.completion, globalCompletion),
+				sortText: MODULE_SORT,
 			})
 			for (const tf of t.fields) {
 				addCompletionItem(completionMap, {
@@ -1936,6 +2031,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					kind: CompletionItemKind.Field,
 					detail: typeDeclFieldDetail(tf),
 					documentation: typeDeclFieldDocs(tf, t),
+					sortText: MODULE_SORT,
 				})
 			}
 			if (t._uri == uri)
@@ -1943,32 +2039,34 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 		for (const t of res.completion.typeDefs) {
 			t._range = AtToRange(t)
-			t._uri = AtToUri(t, uri, settings, res.dasRoot, fixedResults.filesCache)
+			t._uri = AtToUri(t, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			const valueType = findTypeDecl(t.tdk, res.completion, globalCompletion)
 			addCompletionItem(completionMap, {
 				label: t.name,
 				kind: valueType != null ? baseTypeToCompletionItemKind(valueType.baseType) : CompletionItemKind.Struct,
 				detail: typedefDetail(t),
 				documentation: typedefDocs(t),
+				sortText: MODULE_SORT,
 			})
 			addMod(t.mod, t)
 		}
 		for (const g of res.completion.globals) {
 			g._range = AtToRange(g)
-			g._uri = AtToUri(g, uri, settings, res.dasRoot, fixedResults.filesCache)
+			g._uri = AtToUri(g, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			addCompletionItem(completionMap, {
 				label: g.name,
 				kind: CompletionItemKind.Variable,
 				detail: globalDetail(g),
 				documentation: globalDocs(g),
+				sortText: MODULE_SORT,
 			})
 			addMod(g.mod, g)
 		}
 		for (const f of res.completion.functions) {
 			f._range = AtToRange(f)
-			f._uri = AtToUri(f, uri, settings, res.dasRoot, fixedResults.filesCache)
+			f._uri = AtToUri(f, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			f.decl._range = AtToRange(f.decl)
-			f.decl._uri = AtToUri(f.decl, uri, settings, res.dasRoot, fixedResults.filesCache)
+			f.decl._uri = AtToUri(f.decl, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			if ((f.args.length == 1 || f.args.length == 2) && f.name.startsWith(PROPERTY_PREFIX)) {
 				let found = false
 				const td = findTypeDecl(f.args[0].tdk, res.completion, globalCompletion)
@@ -2019,12 +2117,13 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				addUsedModule(f.origMod)
 			for (const arg of f.args) {
 				arg._range = AtToRange(arg)
-				arg._uri = AtToUri(arg, uri, settings, res.dasRoot, fixedResults.filesCache)
+				arg._uri = AtToUri(arg, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 				addCompletionItem(completionMap, {
 					label: arg.name,
 					kind: CompletionItemKind.Variable,
 					detail: funcArgDetail(arg),
 					documentation: funcArgDocs(arg),
+					sortText: MODULE_SORT,
 				})
 			}
 		}
@@ -2036,7 +2135,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		var prevToken: DasToken = null
 		for (const token of tokens) {
 			tokenIdx++
-			token._uri = AtToUri(token, uri, settings, res.dasRoot, fixedResults.filesCache)
+			token._uri = AtToUri(token, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			if (token._uri != uri) // filter out tokens from other files
 				continue
 			addUsedModule(token.mod)
@@ -2069,7 +2168,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			// declAt is negative for tokens that are not declared in the source code
 			if (token.declAt.line >= 0) {
 				token.declAt._range = AtToRange(token.declAt)
-				token.declAt._uri = AtToUri(token.declAt, uri, settings, res.dasRoot, fixedResults.filesCache)
+				token.declAt._uri = AtToUri(token.declAt, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			}
 			else {
 				token.declAt._range = Range.create(0, 0, 0, 0)
@@ -2083,6 +2182,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					kind: CompletionItemKind.Variable,
 					detail: token.name,
 					documentation: describeToken(token, res.completion, globalCompletion),
+					sortText: MODULE_SORT,
 				})
 			}
 
@@ -2257,6 +2357,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				kind: CompletionItemKind.Function,
 				detail: funcDetail(f),
 				documentation: funcDocs(f),
+				sortText: MODULE_SORT,
 			})
 		}
 
@@ -2267,7 +2368,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			mod._range = AtToRange(mod)
 			if (mod.req.length > 0)
 				mod._range.start.character -= "require ".length
-			let fileName = AtToUri(mod, uri, settings, res.dasRoot, fixedResults.filesCache)
+			let fileName = AtToUri(mod, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			if (!fs.existsSync(URI.parse(fileName).fsPath))
 				fileName = ''
 			const declAt: CompletionAt = {
@@ -2353,7 +2454,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 					label: kw,
 					kind: CompletionItemKind.Keyword,
 					// detail: kw,
-					documentation: `keyword ${kw}`
+					documentation: `keyword ${kw}`,
+					sortText: MODULE_SORT,
 				})
 			}
 
@@ -2365,7 +2467,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				addCompletionItem(completionMap, {
 					label: bt,
 					kind: CompletionItemKind.Class,
-					documentation: `type ${bt}`
+					documentation: `type ${bt}`,
+					sortText: MODULE_SORT,
 				})
 			}
 
@@ -2383,6 +2486,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 						label: name,
 						kind: CompletionItemKind.Function,
 						documentation: desc,
+						sortText: MODULE_SORT,
 					})
 				}
 			}
@@ -2403,7 +2507,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				addCompletionItem(completionMap, {
 					label: `options ${opt}`,
 					kind: CompletionItemKind.Keyword,
-					documentation: `options ${opt}`
+					documentation: `options ${opt}`,
+					sortText: MODULE_SORT,
 				})
 			}
 		}
