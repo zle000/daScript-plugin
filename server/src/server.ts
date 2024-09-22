@@ -65,7 +65,6 @@ const connection = createConnection(ProposedFeatures.all)
 
 // Create a manager for open text documents
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument)
-const workspaceFiles: Map<string, URI[]> = new Map<string, URI[]>();
 
 const validatingResults: Map<string/*uri*/, FixedValidationResult> = new Map()
 const autoFormatResult: Map<string/*uri*/, string> = new Map()
@@ -1298,11 +1297,6 @@ connection.onInitialized(async () => {
 
 	setWorkspaceValidationParams(config);
 
-	const workspaceFolderPaths = workspaceFolders.map(f => URI.parse(f.uri).fsPath)
-	for (const folder of workspaceFolderPaths) {
-		workspaceFiles.set(folder, await collectWorkspaceFiles(folder));
-	}
-
 	if (config?.project?.scanWorkspace) {
 		validateWorkspaceCommand({}, defaultWorkspaceValidationParams);
 	}
@@ -1495,17 +1489,16 @@ async function collectWorkspaceFiles(dir: string) {
 
 	while (foldersToVisit.length !== 0) {
 		const files = await promisify(readdir)(foldersToVisit[0]);
-		const fileStats = await Promise.all(files
-			.map(file => fs.promises.stat(join(foldersToVisit[0], file)))
-		)
 
-		for (let i = 0; i < files.length; i++) {
-			if (files[i].startsWith('.')) {
+		for (const file of files) {
+			if (file.startsWith('.')) {
 				continue;
 			}
-			const path = join(foldersToVisit[0], files[i]);
+			const path = join(foldersToVisit[0], file);
 
-			if (fileStats[i].isDirectory()) {
+			const stat = await fs.promises.stat(join(foldersToVisit[0], file))
+
+			if (stat.isDirectory()) {
 				foldersToVisit.push(path);
 			}
 			else if (path.endsWith(".das")) {
@@ -1560,7 +1553,7 @@ async function validateWorkspaceFolder(dir: string, params: WorkspaceValidationP
 		}
 	);
 
-	const files = workspaceFiles.get(dir)
+	const files = await collectWorkspaceFiles(dir)
 
 	if (params?.saveCache) {
 		let cacheFolder = path.join(params.cacheFolder, path.basename(dir));
