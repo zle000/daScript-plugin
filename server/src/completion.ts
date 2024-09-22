@@ -899,6 +899,8 @@ export function AtToUri(at: CompletionAt, documentUri: string, settings: DasSett
     return res
 }
 
+var AtToUriErrors = 3
+
 function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, dasRoot: string) {
     // DON'T DO THIS
     // if (fs.existsSync(at.file)) {
@@ -917,6 +919,18 @@ function AtToUri_(at: CompletionAt, documentUri: string, settings: DasSettings, 
         if (fs.existsSync(full)) {
             return URI.file(full).toString()
         }
+    }
+
+    if (AtToUriErrors > 0) {
+        AtToUriErrors--
+        let paths: Array<string> = []
+        for (const dir of settings.project.roots) {
+            const full = path.join(dir, at.file)
+            paths.push(full)
+        }
+        paths.push(path.join(dasRoot, 'daslib', at.file))
+        paths.push(path.join(dasRoot, 'src/builtin', at.file))
+        console.log("AtToUri_", paths)
     }
 
     return URI.file(at.file).toString()

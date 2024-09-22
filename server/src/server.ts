@@ -1285,8 +1285,19 @@ connection.onInitialized(async () => {
 	}
 	if (hasWorkspaceFolderCapability) {
 		connection.workspace.onDidChangeWorkspaceFolders(_event => {
-			// TODO: support multiple workspace folders
-			connection.console.log('Workspace folder change event received.')
+			if (_event.added.length == 0 && _event.removed.length == 0)
+				return
+			for (const ws of _event.removed) {
+				const idx = workspaceFolders.indexOf(ws)
+				if (idx != -1)
+					workspaceFolders.splice(idx, 1)
+			}
+			for (const ws of _event.added) {
+				if (workspaceFolders.indexOf(ws) == -1)
+					workspaceFolders.push(ws)
+			}
+			validatingResults.clear() // workspace was changes, restart all validations
+			documents.all().forEach(forceUpdateDocumentData)
 		})
 	}
 
