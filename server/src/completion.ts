@@ -17,6 +17,7 @@ export enum Delimiter {
     QuestionAs = '?as',
     Pipe = '|>',
     ColonColon = '::',
+	Assign = '=',
 }
 
 export enum Brackets {

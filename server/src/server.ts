@@ -254,7 +254,12 @@ interface CallChain {
 	brackets: Brackets
 }
 
-function findStructCtor(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean, recursion: number): string {
+interface StructCtor {
+	name: string
+	oldStyle: boolean
+}
+
+function findStructCtor(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean, recursion: number): StructCtor {
 	const line = doc.getText(Range.create(Math.max(0, pos.line - 30), 0, pos.line, pos.character))
 	let i = line.length - 1
 	let numO = 0 // ( )
@@ -286,7 +291,7 @@ function findStructCtor(doc: TextDocument, fileData: FixedValidationResult, pos:
 					break
 			}
 			if (key.length > 0) {
-				return key
+				return { name: key, oldStyle: false }
 			}
 		}
 		if ((ch == '[') && numO == 0 && numE == 0 && numD == -2) {
@@ -301,11 +306,11 @@ function findStructCtor(doc: TextDocument, fileData: FixedValidationResult, pos:
 					break
 			}
 			if (key.length > 0) {
-				return key
+				return { name: key, oldStyle: true }
 			}
 		}
 	}
-	return ""
+	return { name: "", oldStyle: false }
 }
 
 function findCallChain(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean): CallChain[] {
@@ -320,11 +325,26 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 	/// support sequences: foo.key.key2.key3
 	/// also support function calls and array/table access: foo().key, foo[0].key, foo().key[0]
 	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
+	let del = Delimiter.None
+	if (line.length === 0)
+		return []
+	{
+		let j = line.length - 1
+		for (; j >= 0; j--) {
+			const ch = line[j]
+			if (!isSpaceChar(ch)) {
+				break
+			}
+		}
+		// ignore fully empty lines
+		if (j >= 0 && line[j] === '=') {
+			del = Delimiter.Assign
+		}
+	}
 	let key = ''
 	let keyRange: Range
 	let i = line.length - 1
 	let tokens: DasToken[] = []
-	let del = Delimiter.None
 	// if (!forAutocompletion) {
 	// lets try to find token under cursor
 	const cursorTokens = findTokensUnderCursor(doc, fileData, pos)
@@ -809,10 +829,25 @@ connection.onCompletion(async (textDocumentPosition) => {
 	if (!fileData)
 		return getGlobalCompletionItems()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
+	const structCtor = findStructCtor(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true, 0)
 	const res = new Array<Map<string, CompletionItem>>()
 	let mergeWithFileCompletion = false
 	const globalCompletion = getGlobalCompletion()
-	if (callChain.length > 0) {
+	const ignoreCallCain = structCtor.oldStyle && structCtor.name.length > 0 && (
+		(
+			// [[Foo() |]]
+			callChain.length == 2
+			&& callChain[callChain.length - 1].delimiter == Delimiter.Space
+			&& callChain[callChain.length - 1].obj.length == 0
+			&& callChain[callChain.length - 2].obj == structCtor.name
+		) || (
+			// [[Foo |]]
+			callChain.length == 1
+			&& callChain[callChain.length - 1].delimiter == Delimiter.Space
+			&& callChain[callChain.length - 1].obj == structCtor.name
+		)
+	)
+	if (callChain.length > 0 && !ignoreCallCain && callChain[0].delimiter != Delimiter.Assign) {
 		const call = callChain.length >= 2 ? callChain[callChain.length - 2] : callChain[callChain.length - 1] // ignore last key (obj.key - we need obj)
 		const replaceStart = call.objRange.end
 		for (let completionTdk of call.tdks) {
@@ -926,12 +961,11 @@ connection.onCompletion(async (textDocumentPosition) => {
 				globalCompletion.typeDefs.forEach(tdCb)
 		}
 	}
-	const structCtor = findStructCtor(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true, 0)
-	if (structCtor.length > 0) {
-		let td = findTypeDefNoMod(structCtor, fileData.completion, globalCompletion)
+	if (res.length == 0 && structCtor.name.length > 0 && (callChain.length == 0 || callChain[0].delimiter != Delimiter.Assign)) {
+		let td = findTypeDefNoMod(structCtor.name, fileData.completion, globalCompletion)
 		let tdName = td ? tdkName(td.tdk) : null
 		let structCb = (st: CompletionStruct) => {
-			if (st.name == structCtor || (tdName && tdName == st.name)) {
+			if (st.name == structCtor.name || (tdName && tdName == st.name)) {
 				for (const f of st.fields) {
 					const c = CompletionItem.create(f.name)
 					const td = findTypeDecl(f.tdk, fileData.completion, globalCompletion)
