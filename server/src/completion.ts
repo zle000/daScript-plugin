@@ -925,7 +925,7 @@ export function AtToUri(at: CompletionAt, filePath: string, settings: DasSetting
     return res
 }
 
-var AtToUriErrors = 3
+var AtToUriErrors = 0
 
 function AtToUri_(at: CompletionAt, filePath: string, settings: DasSettings, ws: WorkspaceFolder[], dasRoot: string) {
     // DON'T DO THIS
@@ -965,16 +965,16 @@ function AtToUri_(at: CompletionAt, filePath: string, settings: DasSettings, ws:
         let paths: Array<string> = []
         for (const dir of settings.project.roots) {
             const full = path.join(dir, at.file)
-            paths.push(full)
+            paths.push(`root ${full}`)
         }
         for (const w of ws) {
             const full = path.join(URI.parse(w.uri).fsPath, at.file)
-            paths.push(full)
+            paths.push(`ws ${full}`)
         }
         paths.push(`${filePath} (${relativeDir})`)
         paths.push(path.join(dasRoot, 'daslib', at.file))
         paths.push(path.join(dasRoot, 'src/builtin', at.file))
-        console.log("AtToUri_", paths)
+        console.log("AtToUri_", at.file, paths)
     }
 
     return URI.file(at.file).toString()
