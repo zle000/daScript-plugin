@@ -173,7 +173,7 @@ export function findTypeDef(name: string, mod: string, cr: CompletionResult, cr2
 }
 
 export function typedeclAssignOperator(t: CompletionTypeDecl): string {
-    if (t == null)
+    if (!t)
         return '='
     if (t.canCopy)
         return '='

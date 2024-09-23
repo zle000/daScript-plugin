@@ -255,7 +255,7 @@ interface CallChain {
 }
 
 function findStructCtor(doc: TextDocument, fileData: FixedValidationResult, pos: Position, forAutocompletion: boolean, recursion: number): string {
-	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
+	const line = doc.getText(Range.create(Math.max(0, pos.line - 30), 0, pos.line, pos.character))
 	let i = line.length - 1
 	let numO = 0 // ( )
 	let numE = 0 // { }
@@ -926,30 +926,28 @@ connection.onCompletion(async (textDocumentPosition) => {
 				globalCompletion.typeDefs.forEach(tdCb)
 		}
 	}
-	if (res.length == 0) {
-		const structCtor = findStructCtor(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true, 0)
-		if (structCtor.length > 0) {
-			let td = findTypeDefNoMod(structCtor, fileData.completion, globalCompletion)
-			let tdName = td ? tdkName(td.tdk) : null
-			let structCb = (st: CompletionStruct) => {
-				if (st.name == structCtor || (tdName && tdName == st.name)) {
-					for (const f of st.fields) {
-						const c = CompletionItem.create(f.name)
-						const td = findTypeDecl(f.tdk, fileData.completion, globalCompletion)
-						c.insertText = `${f.name} ${typedeclAssignOperator(td)} `
-						c.detail = structFieldDetail(f)
-						c.documentation = structFieldDocs(f, st)
-						c.kind = CompletionItemKind.Field
-						c.sortText = BEFORE_ALL_SORT
-						addCompletionItem(res, c)
-					}
+	const structCtor = findStructCtor(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true, 0)
+	if (structCtor.length > 0) {
+		let td = findTypeDefNoMod(structCtor, fileData.completion, globalCompletion)
+		let tdName = td ? tdkName(td.tdk) : null
+		let structCb = (st: CompletionStruct) => {
+			if (st.name == structCtor || (tdName && tdName == st.name)) {
+				for (const f of st.fields) {
+					const c = CompletionItem.create(f.name)
+					const td = findTypeDecl(f.tdk, fileData.completion, globalCompletion)
+					c.insertText = `${f.name} ${typedeclAssignOperator(td)} `
+					c.detail = structFieldDetail(f)
+					c.documentation = structFieldDocs(f, st)
+					c.kind = CompletionItemKind.Field
+					c.sortText = BEFORE_ALL_SORT
+					addCompletionItem(res, c)
 					mergeWithFileCompletion = true
 				}
 			}
-			fileData.completion.structs.forEach(structCb)
-			if (globalCompletion)
-				globalCompletion.structs.forEach(structCb)
 		}
+		fileData.completion.structs.forEach(structCb)
+		if (globalCompletion)
+			globalCompletion.structs.forEach(structCb)
 	}
 	if (res.length > 0) {
 		var items: CompletionItem[] = []
@@ -1910,6 +1908,8 @@ function addCompletionItem(map: Array<Map<string, CompletionItem>>, item: Comple
 				}
 			}
 		}
+		if (item.insertText)
+			it.insertText = item.insertText
 		return
 	}
 	items.set(item.label, item)
