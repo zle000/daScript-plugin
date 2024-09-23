@@ -43,12 +43,20 @@
 		"prefix": "defo",
 		"body": "def override ${1:name}($2)\n\t${0:pass}"
 	},
+	"def-public": {
+		"prefix": "defp",
+		"body": "def public ${1:name}($2)\n\t${0:pass}"
+	},
+	"def-private": {
+		"prefix": "defr",
+		"body": "def private ${1:name}($2)\n\t${0:pass}"
+	},
 	"block": {
-		"prefix": "blk",
+		"prefix": "block",
 		"body": "$(${1:args})\n\t${0:pass}"
 	},
 	"lambda": {
-		"prefix": "lmd",
+		"prefix": "lambda",
 		"body": "@ <| (${1:args})\n\t${0:pass}"
 	},
 	"lt": {
