@@ -1019,11 +1019,11 @@ connection.onHover(async (textDocumentPosition) => {
 		first = false
 		res += describeToken(tok, fileData.completion, globalCompletion)
 
-		const func = findFunction(tok.name, tok.mod, fileData.completion, globalCompletion)
-		if (func != null && func.cpp.length > 0)
-			res += `\n[::${func.cpp}(...)]`
-
 		if (settings.hovers.verbose) {
+
+			const func = findFunction(tok.name, tok.mod, fileData.completion, globalCompletion)
+			if (func != null && func.cpp.length > 0)
+				res += `\n[::${func.cpp}(...)]`
 
 			if (tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
 				for (const td of fileData.completion.typeDecls) {
@@ -1055,7 +1055,7 @@ connection.onHover(async (textDocumentPosition) => {
 				}
 			}
 		}
-		if (settings.experimental) {
+		if (false) {
 			res += `\n// ${tok.kind}`
 			if (tok.parentTdk.length > 0)
 				res += `\n//^ ${tok.parentTdk}`
@@ -1863,7 +1863,6 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			console.log('failed to parse result', e)
 			console.log('"""', validateTextResult, '"""')
 		}
-		// console.log(result) // TODO: remove this log
 		if (result != null) {
 			for (const error of result.errors) {
 				error._range = AtToRange(error)
@@ -1900,10 +1899,10 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 				diagnostics.set(textDocument.uri, [])
 			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}.` })
 		}
-		if (exitCode !== 0 || result == null) {
-			console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
-			console.log('"""', output, '"""')
-		}
+		// if (exitCode !== 0 || result == null) {
+		// 	console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
+		// 	console.log('"""', output, '"""')
+		// }
 		for (const [uri, diags] of diagnostics.entries()) {
 			connection.sendDiagnostics({ uri: uri, diagnostics: diags })
 		}
