@@ -120,8 +120,12 @@ function debugWsFolders() {
 
 documents.onDidChangeContent((event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
-	connection.languages.inlayHint.refresh()
-	forceUpdateDocumentData(event.document)
+	updateTextDocumentData(event.document)
+})
+
+documents.onDidSave((event) => {
+	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document saved: ${event.document.uri}`)
+	updateTextDocumentData(event.document)
 })
 
 documents.onDidClose(e => {
@@ -1416,8 +1420,7 @@ connection.onInitialized(async () => {
 				if (workspaceFolders.indexOf(ws) == -1)
 					workspaceFolders.push(ws)
 			}
-			validatingResults.clear() // workspace was changes, restart all validations
-			documents.all().forEach(forceUpdateDocumentData)
+			forceUpdateAllDocuments()
 		})
 	}
 
@@ -1451,9 +1454,7 @@ connection.onDidChangeConfiguration(change => {
 		globalSettings = <DasSettings>((change.settings || defaultSettings))
 	}
 
-	// Revalidate all open text documents
-	// TODO: queue validation
-	documents.all().forEach(forceUpdateDocumentData)
+	forceUpdateAllDocuments()
 })
 
 function getDocumentSettings(resource: string): Thenable<DasSettings> {
@@ -1493,37 +1494,43 @@ interface ValidatingProcess {
 const globalCompletionFile = TextDocument.create('$$$completion$$$.das', 'dascript', 1, '// empty')
 const validatingProcesses = new Map<string, ValidatingProcess>()
 
-async function getDocumentDataRaw(uri: string, doc: TextDocument): Promise<FixedValidationResult> {
-	const data = validatingResults.get(uri)
-	if (data)
-		return data
-	const loadingData = validatingProcesses.get(uri)
-	if (loadingData) {
-		return loadingData.promise.then(() => {
-			return validatingResults.get(uri)
-		})
-	}
-	return validateTextDocument(doc).then(() => {
-		return validatingResults.get(uri)
-	})
+// async function getDocumentDataRaw(uri: string, doc: TextDocument): Promise<FixedValidationResult> {
+// 	const data = validatingResults.get(uri)
+// 	if (data && data.fileVersion === doc.version)
+// 		return data
+// 	const loadingData = validatingProcesses.get(uri)
+// 	if (loadingData) {
+// 		return loadingData.promise.then(() => {
+// 			return validatingResults.get(uri)
+// 		})
+// 	}
+// 	return validateTextDocument(doc).then(() => {
+// 		return validatingResults.get(uri)
+// 	})
+// }
+
+function forceUpdateAllDocuments() {
+	validatingResults.clear() // workspace was changes, restart all validations
+	connection.languages.inlayHint.refresh()
+	// documents.all().forEach(doc => getDocumentData(doc.uri))
 }
 
-function forceUpdateDocumentData(doc: TextDocument) {
-	getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
+function updateTextDocumentData(doc: TextDocument) {
+	connection.languages.inlayHint.refresh()
+	validateTextDocument(globalCompletionFile).then(() => {
 		validateTextDocument(doc, { force: true })
 	})
 }
 
 async function getDocumentData(uri: string): Promise<FixedValidationResult> {
-	return getDocumentDataRaw(globalCompletionFile.uri, globalCompletionFile).then(() => {
+	return validateTextDocument(globalCompletionFile).then(() => {
 		let doc = documents.get(uri)
-		if (!doc) {
-			console.log('document not found', uri)
-			return null
+		if (doc) {
+			return validateTextDocument(doc).then(() => {
+				return validatingResults.get(uri)
+			})
 		}
-		return getDocumentDataRaw(uri, doc).then(() => {
-			return validatingResults.get(uri)
-		})
+		return null
 	})
 }
 
@@ -1721,10 +1728,13 @@ async function validateWorkspaceFolder(dir: string, params: WorkspaceValidationP
 
 async function validateTextDocument(textDocument: TextDocument, extra: { autoFormat?: boolean, force?: boolean } = { autoFormat: false, force: false }): Promise<void> {
 	const registerValidatingResult = !extra.autoFormat
+	// TODO: limit validating processes
 	if (registerValidatingResult) {
 		const prevProcess = validatingProcesses.get(textDocument.uri)
 		if (prevProcess) {
 			if (prevProcess.version === textDocument.version) {
+				// TODO: remove
+				console.log('document version not changed, waiting for previous process', textDocument.uri)
 				return prevProcess.promise
 			}
 			prevProcess.process?.kill()
@@ -1733,6 +1743,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 		}
 		const validResult = validatingResults.get(textDocument.uri)
 		if (validResult?.fileVersion === textDocument.version) {
+			// TODO: remove
 			console.log('document version not changed, ignoring', textDocument.uri)
 			return Promise.resolve()
 		}
