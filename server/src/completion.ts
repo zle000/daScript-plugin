@@ -150,6 +150,13 @@ export function findStruct(name: string, mod: string, cr: CompletionResult, cr2:
     return res
 }
 
+export function findEnumTdk(tdk : string, cr: CompletionResult, cr2: CompletionResult): CompletionEnum {
+    let cond = e => e.tdk == tdk
+    let res = cr.enums.find(cond)
+    if (!res && cr2)
+        res = cr2.enums.find(cond)
+    return res
+}
 export function findEnum(name: string, mod: string, cr: CompletionResult, cr2: CompletionResult): CompletionEnum {
     let cond = e => e.name === name && e.mod === mod
     let res = cr.enums.find(cond)
@@ -651,9 +658,9 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                 c.detail = enumValueDetail(v)
                 c.documentation = enumValueDocs(v, en)
                 c.data = en.tdk
-                // if (dotDel) {
-                //     c.insertText = ` == ${en.name} ${v.name}`
-                // }
+                if (dotDel) {
+                    c.insertText = ` == ${en.name} ${v.name}`
+                }
                 c.sortText = FIELD_SORT
                 addUniqueCompletionItem(res, c)
             }

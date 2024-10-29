@@ -35,7 +35,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, tdkModule, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, tdkModule, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs, findEnumTdk } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -655,8 +655,8 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 			}
 		}
 		if (call.obj.length > 0) {
-			if (call.delimiter == Delimiter.Space) {
-				// maybe enum
+			if (call.delimiter == Delimiter.Space || call.delimiter == Delimiter.Dot) {
+				// maybe enum or bitfield
 				let found = false
 				let enumCb = (en) => {
 					if (en.name === call.obj && en.tdk.length > 0) {
@@ -855,6 +855,29 @@ connection.onCompletion(async (textDocumentPosition) => {
 		for (let completionTdk of call.tdks) {
 			let actualTdk = completionTdk
 			let typeDeclData = findTypeDecl(completionTdk, fileData.completion, globalCompletion)
+			if (typeDeclData == null)
+			{
+				let en = findEnumTdk(completionTdk, fileData.completion, globalCompletion)
+				if (en != null)
+				{
+					typeDeclData = {...en,
+						baseType: BaseType.tEnumeration,
+						tdk: en.tdk,
+						fields: [],
+						dim: [],
+						alias: "",
+						sizeOf: 0,
+						alignOf: 0,
+						enumName: en.name,
+						structName: "",
+						tdk1: "",
+						tdk2: "",
+						canCopy: true,
+						canMove: false,
+						canClone: false,
+					}
+				}
+			}
 			const items: CompletionItem[] = []
 			if (typeDeclData != null) {
 				let resTd = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, items)
