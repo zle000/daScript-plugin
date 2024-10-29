@@ -17,7 +17,7 @@ export enum Delimiter {
     QuestionAs = '?as',
     Pipe = '|>',
     ColonColon = '::',
-	Assign = '=',
+    Assign = '=',
 }
 
 export enum Brackets {
@@ -150,7 +150,7 @@ export function findStruct(name: string, mod: string, cr: CompletionResult, cr2:
     return res
 }
 
-export function findEnumTdk(tdk : string, cr: CompletionResult, cr2: CompletionResult): CompletionEnum {
+export function findEnumTdk(tdk: string, cr: CompletionResult, cr2: CompletionResult): CompletionEnum {
     let cond = e => e.tdk == tdk
     let res = cr.enums.find(cond)
     if (!res && cr2)
@@ -198,6 +198,28 @@ export function findTypeDecl(tdk: string, cr: CompletionResult, cr2: CompletionR
     let res = cr.typeDecls.find(cond)
     if (!res && cr2)
         res = cr2.typeDecls.find(cond)
+    if (!res) {
+        let en = findEnumTdk(tdk, cr, cr2)
+        if (en != null) {
+            res = {
+                ...en,
+                baseType: BaseType.tEnumeration,
+                tdk: en.tdk,
+                fields: [],
+                dim: [],
+                alias: "",
+                sizeOf: en.baseType === BaseType.tEnumeration64 ? 8 : 4,
+                alignOf: en.baseType === BaseType.tEnumeration64 ? 8 : 4,
+                enumName: en.name,
+                structName: "",
+                tdk1: "",
+                tdk2: "",
+                canCopy: true,
+                canMove: false,
+                canClone: false,
+            }
+        }
+    }
     return res
 }
 
