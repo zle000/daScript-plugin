@@ -66,6 +66,7 @@ export enum BaseType {
     tEnumeration = 'enum',
     tEnumeration8 = 'enum8',
     tEnumeration16 = 'enum16',
+    tEnumeration64 = 'enum64',
     tBitfield = 'bitfield',
     tPointer = 'pointer',
     tFunction = 'function',
@@ -79,7 +80,7 @@ export enum BaseType {
 }
 
 export function baseTypeIsEnum(bt: BaseType) {
-    return bt === BaseType.tEnumeration || bt === BaseType.tEnumeration8 || bt === BaseType.tEnumeration16
+    return bt === BaseType.tEnumeration || bt === BaseType.tEnumeration8 || bt === BaseType.tEnumeration16 || bt === BaseType.tEnumeration64
 }
 
 export enum TokenKind {
@@ -502,6 +503,7 @@ export function primitiveBaseType(td: CompletionTypeDecl, cr: CompletionResult, 
         t == BaseType.tEnumeration ||
         t == BaseType.tEnumeration8 ||
         t == BaseType.tEnumeration16 ||
+        t == BaseType.tEnumeration64 ||
         t == BaseType.tFunction ||
         t == BaseType.tHandle ||
         t == BaseType.tPointer ||

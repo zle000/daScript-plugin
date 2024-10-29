@@ -91,6 +91,7 @@ def BaseTypeString(t : rtti::Type) : string
     return "enum" if t == Type tEnumeration
     return "enum8" if t == Type tEnumeration8
     return "enum16" if t == Type tEnumeration16
+    return "enum64" if t == Type tEnumeration64
     return "bitfield" if t == Type tBitfield
     return "pointer" if t == Type tPointer
     return "function" if t == Type tFunction
