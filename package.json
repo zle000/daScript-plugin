@@ -300,7 +300,7 @@
 				"dascript.project.compilationConcurrency": {
 					"scope": "resource",
 					"type": "number",
-					"default": 16,
+					"default": 8,
 					"description": "Number of processes to use while validating (compiling) workspace"
 				},
 				"dascript.project.roots": {

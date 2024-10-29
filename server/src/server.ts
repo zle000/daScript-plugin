@@ -76,12 +76,6 @@ let hasConfigurationCapability = false
 let hasWorkspaceFolderCapability = false
 let hasDiagnosticRelatedInformationCapability = false
 
-const validationCacheFolder = './.dascript';
-const defaultWorkspaceValidationParams = <WorkspaceValidationParams>{
-	saveCache: false,
-	cacheFolder: './dascript',
-	queueCapacity: 16
-}
 
 const serverCommandHandlers: { [k in string]: (args: any) => Promise<void> } = {
 	'validateWorkspace': async args => await validateWorkspaceCommand(args),
@@ -89,10 +83,14 @@ const serverCommandHandlers: { [k in string]: (args: any) => Promise<void> } = {
 }
 
 
-function setWorkspaceValidationParams(config: any) {
-	defaultWorkspaceValidationParams.saveCache = config?.project?.storeCompilationData ?? defaultWorkspaceValidationParams.saveCache
-	defaultWorkspaceValidationParams.queueCapacity = config?.project?.compilationConcurrency ?? defaultWorkspaceValidationParams.queueCapacity
+function setWorkspaceValidationParams(config: any): WorkspaceValidationParams {
+	return {
+		saveCache: config?.project?.storeCompilationData ?? false,
+		cacheFolder: './dascript',
+		queueCapacity: config?.project?.compilationConcurrency ?? 8,
+	}
 }
+
 
 function mangleFileUri(uri: DocumentUri, version?: number): string {
 	const filePath = URI.parse(uri).fsPath;
@@ -1429,10 +1427,8 @@ connection.onInitialized(async () => {
 		section: 'dascript'
 	})
 
-	setWorkspaceValidationParams(config);
-
 	if (config?.project?.scanWorkspace) {
-		validateWorkspaceCommand({}, defaultWorkspaceValidationParams);
+		validateWorkspaceCommand({});
 	}
 })
 
@@ -1534,7 +1530,15 @@ async function getDocumentData(uri: string): Promise<FixedValidationResult> {
 	})
 }
 
-async function validateWorkspaceCommand(args: any = {}, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+async function validateWorkspaceCommand(args: any = {}): Promise<void> {
+
+	let config = await connection.workspace.getConfiguration({
+		scopeUri: 'resource',
+		section: 'dascript'
+	})
+
+	let params = setWorkspaceValidationParams(config);
+
 	let timerName: string = 'validateWorkspace';
 
 	console.time(timerName);
@@ -1551,9 +1555,16 @@ async function validateWorkspaceCommand(args: any = {}, params: WorkspaceValidat
 }
 
 async function clearCachedValidationDataCommand(): Promise<void> {
+	let config = await connection.workspace.getConfiguration({
+		scopeUri: 'resource',
+		section: 'dascript'
+	})
+
+	let params = setWorkspaceValidationParams(config);
+
 	for (const folder of workspaceFolders.map(f => URI.parse(f.uri).fsPath)) {
 		fs.rmSync(
-			path.join(defaultWorkspaceValidationParams.cacheFolder, path.basename(folder)),
+			path.join(params.cacheFolder, path.basename(folder)),
 			{ recursive: true }
 		);
 	}
@@ -1674,7 +1685,7 @@ async function startQueueValidationJob(dir: string, file: string, params: Worksp
 	}
 }
 
-async function validateWorkspaceFolder(dir: string, params: WorkspaceValidationParams = defaultWorkspaceValidationParams): Promise<void> {
+async function validateWorkspaceFolder(dir: string, params: WorkspaceValidationParams): Promise<void> {
 	return; // TODO: temporary disable scanning
 	let validatingQueue: ValidatingQueue = new ValidatingQueue(params?.queueCapacity);
 	const token = `validation/${dir}`;
