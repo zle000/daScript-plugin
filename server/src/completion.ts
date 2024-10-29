@@ -651,9 +651,9 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                 c.detail = enumValueDetail(v)
                 c.documentation = enumValueDocs(v, en)
                 c.data = en.tdk
-                if (dotDel) {
-                    c.insertText = ` == ${en.name} ${v.name}`
-                }
+                // if (dotDel) {
+                //     c.insertText = ` == ${en.name} ${v.name}`
+                // }
                 c.sortText = FIELD_SORT
                 addUniqueCompletionItem(res, c)
             }
