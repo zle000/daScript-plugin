@@ -100,7 +100,7 @@ export function activate(context: ExtensionContext) {
 			}
 			const client = new LanguageClient('dascript', serverOptions, clientOptions)
 
-			registerClientCommands(context, client);
+			// registerClientCommands(context, client); // breaks on second client
 
 			client.start()
 			clients.set(folder.uri.toString(), client)
