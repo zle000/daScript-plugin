@@ -855,29 +855,6 @@ connection.onCompletion(async (textDocumentPosition) => {
 		for (let completionTdk of call.tdks) {
 			let actualTdk = completionTdk
 			let typeDeclData = findTypeDecl(completionTdk, fileData.completion, globalCompletion)
-			if (typeDeclData == null)
-			{
-				let en = findEnumTdk(completionTdk, fileData.completion, globalCompletion)
-				if (en != null)
-				{
-					typeDeclData = {...en,
-						baseType: BaseType.tEnumeration,
-						tdk: en.tdk,
-						fields: [],
-						dim: [],
-						alias: "",
-						sizeOf: 0,
-						alignOf: 0,
-						enumName: en.name,
-						structName: "",
-						tdk1: "",
-						tdk2: "",
-						canCopy: true,
-						canMove: false,
-						canClone: false,
-					}
-				}
-			}
 			const items: CompletionItem[] = []
 			if (typeDeclData != null) {
 				let resTd = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, items)
