@@ -658,7 +658,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                         return
                     const c = CompletionItem.create(f.name)
                     if (onlyFunctions)
-                        c.insertText = `->${f.name}(`
+                        c.insertText = `.${f.name}(`
                     c.kind = isFunction ? CompletionItemKind.Reference : f._property ? CompletionItemKind.Property : CompletionItemKind.Field
                     c.detail = structFieldDetail(f)
                     c.documentation = structFieldDocs(f, st)
