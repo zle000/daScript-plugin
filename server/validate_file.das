@@ -113,6 +113,9 @@ struct ModuleRequirement : CompletionAt
 struct ValidationResult
     tokens : array<DasToken>
     errors : array<DasError>
+    // processedMods : array<string>
+    // progMods : array<string>
+    // allMods : array<string>
     completion : CompletionResult
     dasRoot : string
     autoFormat : string
@@ -159,27 +162,8 @@ def compile(var res : ValidationResult; config : ValidateConfig)
 
                         if ok && program != null
                             var inscope completion <- CompletionContext()
-                            var processed : table<string>
-                            program |> get_ptr() |> for_each_module() <| $(mod)
-                                if config.globalCompletion != mod |> is_builtin()
-                                    return
-                                completion |> parse_module(mod)
-                                processed |> insert("{mod.name}")
-                            program_for_each_registered_module() <| $(mod)
-                                if config.globalCompletion != mod |> is_builtin()
-                                    return
-                                if !key_exists(processed, "{mod.name}")
-                                    completion |> parse_module(mod)
 
-                            var visitor <- new AstData()
-                            visitor.res = unsafe(addr(res))
-                            visitor.completion = unsafe(addr(completion))
-                            var inscope adapter <- make_visitor(*visitor)
-                            program |> visit(adapter)
-                            unsafe
-                                delete visitor
-
-                            res.completion <- completion.result
+                            var allDeps : table<uint64>
 
                             program |> for_each_require_declaration() <| $(mod, name, file, isPublic, at)
                                 var modReq <- [[ModuleRequirement()
@@ -187,6 +171,7 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                                     req = "{name}",
                                     isPublic = isPublic
                                 ]]
+                                allDeps |> insert(intptr(mod))
                                 modReq |> fill_at(at)
                                 modReq.file = "{file}"
                                 if mod != null
@@ -198,15 +183,59 @@ def compile(var res : ValidationResult; config : ValidateConfig)
                                         var mod2 = mods |> back()
                                         mods |> pop()
                                         mod2.mod |> module_for_each_dependency() <| $(dep, isPublic2)
-                                            return if !isPublic2
+                                            return if !isPublic2 || dep == null
 
-                                            var depData = [[ModDeps() mod = dep != null ? "{dep.name}" : "", depth = mod2.depth + 1]]
-                                            modReq.dependencies |> emplace(depData)
+                                            modReq.dependencies |> emplace([[ModDeps() mod = "{dep.name}", depth = mod2.depth + 1]])
+                                            allDeps |> insert(intptr(dep))
                                             if !allMods |> key_exists(intptr(dep))
                                                 mods |> push([[auto dep, mod2.depth + 1]])
                                                 allMods |> insert(intptr(dep))
 
                                 res.requirements |> emplace(modReq)
+
+                            allDeps |> insert(intptr(program |> get_this_module()))
+
+                            // if config.globalCompletion
+                            // if true
+                            //     program_for_each_registered_module() <| $(mod)
+                            //         res.allMods |> push("{mod.name}")
+                            //         if !is_builtin(mod)
+                            //             return
+                            //         if key_exists(processed, "{mod.name}")
+                            //             return
+                            //         completion |> parse_module(mod)
+                            //         processed |> insert("{mod.name}")
+
+                            // else
+
+                            // program_for_each_registered_module() <| $(mod)
+                            //     res.allMods |> push("{mod.name}")
+
+                            var processed : table<string>
+                            if true
+                                program |> get_ptr() |> for_each_module() <| $(mod)
+                                    // res.progMods |> push("{mod.name}")
+                                    // global completion now contains only $(builtin) module
+                                    if config.globalCompletion && mod.name != "$"
+                                        return
+                                    if !config.globalCompletion && (!key_exists(allDeps, intptr(mod)) || mod.name == "$")
+                                        return
+                                    if key_exists(processed, "{mod.name}")
+                                        return
+                                    completion |> parse_module(mod)
+                                    processed |> insert("{mod.name}")
+
+                            // res.processedMods <- [for it in keys(processed); it]
+
+                            var visitor <- new AstData()
+                            visitor.res = unsafe(addr(res))
+                            visitor.completion = unsafe(addr(completion))
+                            var inscope adapter <- make_visitor(*visitor)
+                            program |> visit(adapter)
+                            unsafe
+                                delete visitor
+
+                            res.completion <- completion.result
 
                         if program == null
                             res.errors |> emplace([[DasError() what = "{error}", file=config.file ]])

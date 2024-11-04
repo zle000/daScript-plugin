@@ -249,10 +249,10 @@ struct CompletionTypeDecl : CompletionAt
 
 let skipTypeDescSize = [[auto[] Type none; Type autoinfer; Type fakeLineInfo; Type fakeContext; Type alias; Type anyArgument]]
 
-def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<TypeDecl>&) : int
+def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<TypeDecl>&) : void
     var foundIdx = res.typeDecls?[tdk] ?? -1
     if foundIdx >= 0
-        return foundIdx
+        return
     foundIdx = res.result.typeDecls |> length()
     res.typeDecls[tdk] = foundIdx
     // if t.argNames |> length() > 0
@@ -307,7 +307,7 @@ def parse_typedecl(var res : CompletionContext; tdk : string; t : smart_ptr<Type
         td.tdk2 = TypeDeclKey(t.secondType)
         res |> parse_typedecl(td.tdk2, t.secondType)
     res.result.typeDecls |> emplace(td)
-    return foundIdx
+    // return foundIdx
 
 /// type def
 

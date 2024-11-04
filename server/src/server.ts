@@ -35,7 +35,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, tdkModule, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclFieldDocs, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs, findEnumTdk } from './completion'
+import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -164,7 +164,7 @@ connection.onInitialize((params) => {
 		capabilities: {
 			completionProvider: {
 				resolveProvider: false,
-				triggerCharacters: ['.', ' ', '>', ':'],
+				triggerCharacters: ['.', '>', ':'],
 			},
 			hoverProvider: true,
 			definitionProvider: true,
@@ -347,16 +347,16 @@ function findCallChain_(doc: TextDocument, fileData: FixedValidationResult, pos:
 	let keyRange: Range
 	let i = line.length - 1
 	let tokens: DasToken[] = []
-	// if (!forAutocompletion) {
-	// lets try to find token under cursor
-	const cursorTokens = findTokensUnderCursor(doc, fileData, pos)
-	for (const cursorTok of cursorTokens) {
-		tokens.push(cursorTok)
-		key = cursorTok.name
-		keyRange = cursorTok._range
-		i = doc.offsetAt(cursorTok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
+	if (fileData.errors.length == 0) {
+		// lets try to find token under cursor
+		const cursorTokens = findTokensUnderCursor(doc, fileData, pos)
+		for (const cursorTok of cursorTokens) {
+			tokens.push(cursorTok)
+			key = cursorTok.name
+			keyRange = cursorTok._range
+			i = doc.offsetAt(cursorTok._range.start) - doc.offsetAt(Position.create(pos.line, 0)) - 1
+		}
 	}
-	// }
 
 	// if (forAutocompletion || tokens.length === 0) {
 	if (tokens.length === 0) {
@@ -579,13 +579,11 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 	const globalCompletion = getGlobalCompletion()
 
 	let prevTdks: Set<string>
-	let prevBrackets: Brackets = Brackets.None
 	let prevDelimiter: Delimiter = Delimiter.None
 	let prevDelimiterRange: Range
 	var idx = 0
 	while (idx < callChain.length) {
 		if (idx > 0) {
-			prevBrackets = callChain[idx - 1].brackets
 			prevDelimiter = callChain[idx - 1].delimiter
 			prevDelimiterRange = callChain[idx - 1].delimiterRange
 		}
@@ -629,13 +627,13 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 				if (typeDeclData != null) {
 					var next: CompletionItem[] = []
 					if (call.obj.length == 0 && call.brackets == Brackets.Square) {
-						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, next)
+						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, call.obj, next)
 						if (nextTdk.tdk != prevTdk) {
 							call.tdks.add(nextTdk.tdk)
 						}
 					}
 					if (call.obj.length > 0) {
-						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, prevDelimiter, prevBrackets, next)
+						// const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, prevDelimiter, prevBrackets, call.obj, next)
 						if (call.obj.length > 0) {
 							for (const it of next) {
 								if (it.label == call.obj) {
@@ -857,7 +855,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 			let typeDeclData = findTypeDecl(completionTdk, fileData.completion, globalCompletion)
 			const items: CompletionItem[] = []
 			if (typeDeclData != null) {
-				let resTd = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, items)
+				let resTd = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, call.obj, items)
 				if (resTd.tdk.length > 0)
 					actualTdk = resTd.tdk
 
@@ -1995,8 +1993,8 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		let globalCompletionRes = uri != globalCompletionFile.uri ? validatingResults.get(globalCompletionFile.uri) : null
 		let globalCompletion = globalCompletionRes ? globalCompletionRes.completion : null
 
-		const modules = new Set<string>()
-		var usedModules: Set<string> = new Set()
+		let modules = new Set<string>()
+		let usedModules: Set<string> = new Set()
 		function addUsedModule(mod: string) {
 			if (mod.length > 0)
 				usedModules.add(mod)
@@ -2073,22 +2071,23 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		for (const t of res.completion.typeDecls) {
 			t._range = AtToRange(t)
 			t._uri = AtToUri(t, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
-			addCompletionItem(completionMap, {
-				label: t.tdk,
-				kind: baseTypeToCompletionItemKind(t.baseType),
-				detail: typeDeclDetail(t),
-				documentation: typeDeclDocs(t, res.completion, globalCompletion),
-				sortText: MODULE_SORT,
-			})
-			for (const tf of t.fields) {
-				addCompletionItem(completionMap, {
-					label: tf.name,
-					kind: CompletionItemKind.Field,
-					detail: typeDeclFieldDetail(tf),
-					documentation: typeDeclFieldDocs(tf, t),
-					sortText: MODULE_SORT,
-				})
-			}
+			//SKIP it, a lot of data, to reduce completion items
+			// addCompletionItem(completionMap, {
+			// 	label: t.tdk,
+			// 	kind: baseTypeToCompletionItemKind(t.baseType),
+			// 	detail: typeDeclDetail(t),
+			// 	documentation: typeDeclDocs(t, res.completion, globalCompletion),
+			// 	sortText: MODULE_SORT,
+			// })
+			// for (const tf of t.fields) {
+			// 	addCompletionItem(completionMap, {
+			// 		label: tf.name,
+			// 		kind: CompletionItemKind.Field,
+			// 		detail: typeDeclFieldDetail(tf),
+			// 		documentation: typeDeclFieldDocs(tf, t),
+			// 		sortText: MODULE_SORT,
+			// 	})
+			// }
 			if (t._uri == uri)
 				addUsedModule(t.mod)
 		}

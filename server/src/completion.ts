@@ -468,7 +468,7 @@ export function typeDeclDefinition(td: CompletionTypeDecl, cr: CompletionResult,
         if (st)
             return st
         else
-            console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
+            console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     // enum with zero name == unspecified enumeration const
     if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
@@ -476,21 +476,21 @@ export function typeDeclDefinition(td: CompletionTypeDecl, cr: CompletionResult,
         if (en)
             return en
         else
-            console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
+            console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     if (td.alias.length > 0) {
         const td1 = findTypeDef(td.alias, td.mod, cr, cr2)
         if (td1)
             return td1
         // else
-        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}`)
+        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)
     // 	if (func)
     // 		return func.decl
     // 	else
-    // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}`)
+    // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     // }
     // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
     if ((td.baseType === BaseType.tPointer || td.baseType === BaseType.tArray || td.dim.length > 0) && td.tdk1.length > 0) {
@@ -552,7 +552,7 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
         if (st)
             return cb(td, st, null, null)
         else
-            console.error(`typeDeclDocs: failed to find struct ${td.structName} in ${td.mod}`)
+            console.error(`typeDeclDocs: failed to find struct ${td.structName} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     // enum with zero name == unspecified enumeration const
     if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0) {
@@ -560,21 +560,21 @@ export function typeDeclIter(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
         if (en)
             return cb(td, null, en, null)
         else
-            console.error(`typeDeclDocs: failed to find enum ${td.enumName} in ${td.mod}`)
+            console.error(`typeDeclDocs: failed to find enum ${td.enumName} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     if (td.alias.length > 0) {
         const td1 = findTypeDef(td.alias, td.mod, cr, cr2)
         if (td1)
             cb(td, null, null, td1)
         // else
-        //     console.error(`typeDeclDocs: failed to find type ${td.alias} in ${td.mod}`)
+        //     console.error(`typeDeclDocs: failed to find type ${td.alias} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => modPrefix(f.mod) + f.name === td.tdk)
     // 	if (func)
     // 		return funcDocs(func)
     // 	else
-    // 		console.error(`typeDeclDocs: failed to find function ${td.tdk} in ${td.mod}`)
+    // 		console.error(`typeDeclDocs: failed to find function ${td.tdk} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     // }
     // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
     // if ((td.baseType === BaseType.tPointer || td.baseType === BaseType.tArray || td.dim.length > 0) && td.tdk1.length > 0) {
@@ -634,10 +634,10 @@ function addUniqueCompletionItem(res: CompletionItem[], c: CompletionItem) {
 }
 
 // returns actual CompletionTypeDecl
-export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, cr2: CompletionResult, delimiter: Delimiter, brackets: Brackets, res: CompletionItem[]): CompletionTypeDecl {
-    return typeDeclCompletion_(td, cr, cr2, delimiter, brackets, 0, res)
+export function typeDeclCompletion(td: CompletionTypeDecl, cr: CompletionResult, cr2: CompletionResult, delimiter: Delimiter, brackets: Brackets, text: string, res: CompletionItem[]): CompletionTypeDecl {
+    return typeDeclCompletion_(td, cr, cr2, delimiter, brackets, text, 0, res)
 }
-function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: CompletionResult, delimiter: Delimiter, brackets: Brackets, depth: number, res: CompletionItem[]): CompletionTypeDecl {
+function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: CompletionResult, delimiter: Delimiter, brackets: Brackets, text: string, depth: number, res: CompletionItem[]): CompletionTypeDecl {
     if (depth > 50) {
         console.error(`typeDeclCompletion: recursion depth exceeded for ${td.tdk}`)
         return td
@@ -668,7 +668,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                 })
         }
         else
-            console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}`)
+            console.error(`typeDeclDefinition: failed to find struct ${td.structName} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     // enum with zero name == unspecified enumeration const
     if (baseTypeIsEnum(td.baseType) && td.dim.length == 0 && td.enumName.length > 0 && (dotDel || spaceDel) && brackets != Brackets.Square && brackets != Brackets.QuestionSquare) {
@@ -680,7 +680,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
                 c.detail = enumValueDetail(v)
                 c.documentation = enumValueDocs(v, en)
                 c.data = en.tdk
-                if (dotDel) {
+                if (dotDel && (text != en.name && text != en.tdk)) {
                     c.insertText = ` == ${en.name} ${v.name}`
                 }
                 c.sortText = FIELD_SORT
@@ -688,32 +688,32 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
             }
         }
         else
-            console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}`)
+            console.error(`typeDeclDefinition: failed to find enum ${td.enumName} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     if (td.alias.length > 0) {
         const td1 = findTypeDef(td.alias, td.mod, cr, cr2)
         if (td1) {
             const td2 = findTypeDecl(td1.tdk, cr, cr2)
             if (td2 && td2 != td)
-                resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+                resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
             // else
-            //     console.error(`typeDeclDefinition: failed to find type ${td1.tdk} in ${td.mod}`)
+            //     console.error(`typeDeclDefinition: failed to find type ${td1.tdk} in ${td.mod}:${td._uri}:${td._range.start.line}`)
         }
         // else
-        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}`)
+        //     console.error(`typeDeclDefinition: failed to find type ${td.alias} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     }
     // if (td.baseType === BaseType.tFunction) {
     // 	const func = cr.functions.find(f => f.name === td.tdk && f.mod === td.mod)
     // 	if (func)
     // 		return func.decl
     // 	else
-    // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}`)
+    // 		console.error(`typeDeclDefinition: failed to find function ${td.tdk} in ${td.mod}:${td._uri}:${td._range.start.line}`)
     // }
     // pointer with empty tdk1 is void, array with empty tdk1 is unspecified array
     if ((td.baseType === BaseType.tPointer || ((td.baseType === BaseType.tArray || td.dim.length > 0) && (brackets == Brackets.Square || brackets == Brackets.QuestionSquare))) && td.tdk1.length > 0) {
         const td1 = findTypeDecl(td.tdk1, cr, cr2)
         if (td1)
-            resultTd = typeDeclCompletion_(td1, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+            resultTd = typeDeclCompletion_(td1, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk1}`)
     }
@@ -721,7 +721,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
     if (td.baseType === BaseType.tTable && (brackets == Brackets.Square || brackets == Brackets.QuestionSquare) && td.dim.length == 0 && td.tdk1.length > 0) {
         const td2 = findTypeDecl(td.tdk2, cr, cr2)
         if (td2)
-            resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+            resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
         else
             console.error(`typeDeclDefinition: failed to find type ${td.tdk2}`)
     }
@@ -768,12 +768,12 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
         else if (td.baseType == BaseType.tRange64) {
             const td2 = findTypeDecl(BaseType.tInt64, cr, cr2)
             if (td2)
-                resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+                resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
         }
         else if (td.baseType == BaseType.tURange64) {
             const td2 = findTypeDecl(BaseType.tUInt64, cr, cr2)
             if (td2)
-                resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+                resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
         } else if (td.baseType == BaseType.tBlock) {
             const c = CompletionItem.create('invoke')
             c.kind = CompletionItemKind.Keyword
@@ -785,7 +785,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
     if (delimiter == Delimiter.Is) {
         const td2 = findTypeDecl(BaseType.tBool, cr, cr2)
         if (td2 && td2 != td)
-            resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+            resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
     }
     let searchOperatorName = brackets == Brackets.Square ? '[]' : brackets == Brackets.QuestionSquare ? '?[]' : ''
     if (searchOperatorName.length > 0) {
@@ -793,7 +793,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
             if (fn.args.length > 0 && fn.name == searchOperatorName && fn.args[0].tdk === td.tdk) {
                 const td2 = findTypeDecl(fn.tdk, cr, cr2)
                 if (td2) {
-                    resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, depth + 1, res)
+                    resultTd = typeDeclCompletion_(td2, cr, cr2, delimiter, Brackets.None, text, depth + 1, res)
                 }
             }
         }
@@ -940,6 +940,9 @@ export interface ValidationResult {
     completion: CompletionResult
     dasRoot: string
     requirements: ModuleRequirement[]
+    // processedMods : string[]
+    // allMods: string[]
+    // progMods: string[]
 }
 
 export function AtToUri(at: CompletionAt, filePath: string, settings: DasSettings, ws: WorkspaceFolder[], dasRoot: string, cache: Map<string, string> = null) {
