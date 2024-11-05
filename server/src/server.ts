@@ -888,7 +888,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 							c.detail = funcDetail(fn);
 							c.documentation = funcDocs(fn);
 							c.kind = isProperty ? CompletionItemKind.Property : isOperator ? CompletionItemKind.Operator : CompletionItemKind.Function;
-							const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : ` |> ${fn.name}(`;
+							const newText = isProperty ? c.label : isOperator ? OPERATOR_REMAP.get(c.label) ?? c.label : `.${fn.name}(`;
 							fixCompletion(c, newText, replaceStart, textDocumentPosition.position);
 							c.sortText = isProperty ? PROPERTY_SORT : isOperator ? OPERATOR_SORT : EXTENSION_FN_SORT;
 							const prev = items.find((it) => it.label === c.label && it.kind === c.kind && it.detail === c.detail && it.documentation === c.documentation);

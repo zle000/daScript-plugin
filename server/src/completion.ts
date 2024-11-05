@@ -777,7 +777,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
         } else if (td.baseType == BaseType.tBlock) {
             const c = CompletionItem.create('invoke')
             c.kind = CompletionItemKind.Keyword
-            c.insertText = ' |> invoke('
+            c.insertText = '.invoke('
             c.sortText = EXTENSION_FN_SORT
             addUniqueCompletionItem(res, c)
         }
