@@ -256,6 +256,11 @@ interface CallChain {
 	brackets: Brackets
 }
 
+function findRequirement(doc: TextDocument, fileData: FixedValidationResult, pos: Position): boolean {
+	const line = doc.getText(Range.create(pos.line, 0, pos.line, pos.character))
+	return line.startsWith('require ')
+}
+
 interface StructCtor {
 	name: string
 	oldStyle: boolean
@@ -990,6 +995,14 @@ connection.onCompletion(async (textDocumentPosition) => {
 		}
 		if (mergeWithFileCompletion) {
 			items.push(...fileData.completionItems)
+		}
+		return items
+	}
+	if (findRequirement(doc, fileData, textDocumentPosition.position)) {
+		let items: CompletionItem[] = []
+		for (const it of fileData.completionItems) {
+			if (it.kind == CompletionItemKind.Module)
+				items.push(it)
 		}
 		return items
 	}
