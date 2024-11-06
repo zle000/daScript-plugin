@@ -35,7 +35,7 @@ import {
 
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
 import { URI } from 'vscode-uri'
-import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs } from './completion'
+import { AtToRange, AtToUri, BEFORE_ALL_SORT, BaseType, Brackets, CompletionAt, CompletionEnum, CompletionResult, CompletionStruct, DasToken, Delimiter, EXTENSION_FN_SORT, FIELD_SORT, FixedValidationResult, MODULE_SORT, ModuleRequirement, OPERATOR_SORT, PROPERTY_PREFIX, PROPERTY_SORT, TokenKind, ValidationResult, addUniqueLocation, addValidLocation, closedBracketPos, describeToken, enumDetail, enumDocs, enumValueDetail, enumValueDocs, findEnum, findFunction, findStruct, findTypeDecl, findTypeDef, findTypeDefNoMod, fixPropertyName, funcArgDetail, funcArgDocs, funcDetail, funcDocs, getParentStruct, globalDetail, globalDocs, isPositionLess, isPositionLessOrEqual, isRangeEqual, isRangeLengthZero, isRangeLess, isRangeZeroEmpty, isSpaceChar, isValidIdChar, isValidLocation, posInRange, primitiveBaseType, rangeCenter, rangeLength, tdkName, structDetail, structDocs, structFieldDetail, structFieldDocs, typeDeclCompletion, typeDeclDefinition, typeDeclDetail, typeDeclDocs, typeDeclFieldDetail, typeDeclIter, typedeclAssignOperator, typedefDetail, typedefDocs, CompletionTypeDef } from './completion'
 import { DasSettings, defaultSettings, documentSettings } from './dasSettings'
 import path = require('path')
 import fs = require('fs')
@@ -661,17 +661,26 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 			if (call.delimiter == Delimiter.Space || call.delimiter == Delimiter.Dot) {
 				// maybe enum or bitfield
 				let found = false
-				let enumCb = (en) => {
+				let enumCb = (en: CompletionEnum) => {
 					if (en.name === call.obj && en.tdk.length > 0) {
 						call.tdks.add(en.tdk);
 						found = true;
+					}
+					if (prevTdks && prevTdks.has(en.tdk)) {
+						for (const it of en.values) {
+							if (it.name == call.obj) {
+								call.tdks.add(en.tdk);
+								found = true;
+								break;
+							}
+						}
 					}
 				}
 				fileData.completion.enums.forEach(enumCb)
 				if (globalCompletion)
 					globalCompletion.enums.forEach(enumCb)
 				// or alias
-				let aliasCb = (td) => {
+				let aliasCb = (td: CompletionTypeDef) => {
 					if (td.name === call.obj && td.tdk.length > 0) {
 						call.tdks.add(td.tdk);
 						found = true;
@@ -681,9 +690,10 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 				if (globalCompletion)
 					globalCompletion.typeDefs.forEach(aliasCb)
 
-				prevTdks = call.tdks
-				if (found)
+				if (found) {
+					prevTdks = call.tdks
 					continue
+				}
 			}
 			else if (call.brackets == Brackets.Round) {
 				let fnCb = (fn) => {
@@ -875,7 +885,10 @@ connection.onCompletion(async (textDocumentPosition) => {
 				if (actualTdk != completionTdk)
 					tdks.push(actualTdk)
 
+				const tdkSuffix = `::${call.obj}`
 				for (const tdk of tdks) {
+					if (tdk == call.obj || tdk.endsWith(tdkSuffix))
+						continue;
 					// fill extension functions
 					const extFn = (fn) => {
 						if (fn.isClassMethod) {
