@@ -940,9 +940,9 @@ export interface ValidationResult {
     completion: CompletionResult
     dasRoot: string
     requirements: ModuleRequirement[]
+    builtinMods: string[]
     // processedMods : string[]
     // allMods: string[]
-    // progMods: string[]
 }
 
 export function AtToUri(at: CompletionAt, filePath: string, settings: DasSettings, ws: WorkspaceFolder[], dasRoot: string, cache: Map<string, string> = null) {

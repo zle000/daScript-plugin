@@ -1992,6 +1992,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 	else {
 		let globalCompletionRes = uri != globalCompletionFile.uri ? validatingResults.get(globalCompletionFile.uri) : null
 		let globalCompletion = globalCompletionRes ? globalCompletionRes.completion : null
+		let isGlobalCompletion = uri == globalCompletionFile.uri
 
 		let modules = new Set<string>()
 		let usedModules: Set<string> = new Set()
@@ -2000,6 +2001,17 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 				usedModules.add(mod)
 		}
 		const completionMap = new Array<Map<string, CompletionItem>>()
+		for (const name of fixedResults.builtinMods) {
+			modules.add(name)
+			if (isGlobalCompletion)
+				addCompletionItem(completionMap, {
+					label: name,
+					kind: CompletionItemKind.Module,
+					detail: `module ${name}`,
+					documentation: `(builtin module)`,
+					sortText: MODULE_SORT,
+				})
+		}
 		function addMod(name: string, at: CompletionAt) {
 			if (name?.length == 0)
 				return

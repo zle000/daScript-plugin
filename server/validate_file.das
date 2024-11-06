@@ -113,8 +113,8 @@ struct ModuleRequirement : CompletionAt
 struct ValidationResult
     tokens : array<DasToken>
     errors : array<DasError>
+    builtinMods : array<string>
     // processedMods : array<string>
-    // progMods : array<string>
     // allMods : array<string>
     completion : CompletionResult
     dasRoot : string
@@ -208,8 +208,9 @@ def compile(var res : ValidationResult; config : ValidateConfig)
 
                             // else
 
-                            // program_for_each_registered_module() <| $(mod)
-                            //     res.allMods |> push("{mod.name}")
+                            program_for_each_registered_module() <| $(mod)
+                                if mod |> is_builtin()
+                                    res.builtinMods |> push("{mod.name}")
 
                             var processed : table<string>
                             if true
