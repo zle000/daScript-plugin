@@ -9,7 +9,6 @@ require ast
 require rtti
 require strings
 require fio
-require uriparser
 require daslib/ast_boost
 require daslib/strings_boost
 require daslib/json_boost

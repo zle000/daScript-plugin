@@ -179,13 +179,13 @@ struct CompletionStruct : CompletionAt
     isGenerator : bool
     gen : bool
 
-def resolve_str(s : smart_ptr<Structure>&) : Structure?
+def resolve_str(var s : smart_ptr<Structure>&) : Structure?
     return s |> get_ptr()
 
-def resolve_str(s : Structure?) : Structure?
+def resolve_str(var s : Structure?) : Structure?
     return s
 
-def parse_struct(var res : CompletionContext; s : smart_ptr<Structure>& | Structure?)
+def parse_struct(var res : CompletionContext; var s : smart_ptr<Structure>& | Structure?)
     var st <- [[CompletionStruct() name="{s.name}"]]
     st |> fill_at(s.at)
     if s._module != null
