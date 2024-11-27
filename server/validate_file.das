@@ -11,7 +11,6 @@ require strings
 require fio
 require daslib/ast_boost
 require daslib/strings_boost
-require daslib/json_boost
 require daslib/das_source_formatter
 require completion_boost
 
