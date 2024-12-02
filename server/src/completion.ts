@@ -1,5 +1,5 @@
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { CompletionItem, CompletionItemKind, Location, Position, Range, WorkspaceFolder, integer } from 'vscode-languageserver/node'
+import { CompletionItem, CompletionItemKind, Diagnostic, Location, Position, Range, WorkspaceFolder, integer } from 'vscode-languageserver/node'
 import { URI } from 'vscode-uri'
 import { DasSettings } from './dasSettings'
 import fs = require('fs')
@@ -1030,6 +1030,7 @@ export interface FixedValidationResult extends ValidationResult {
     fileVersion: integer
     completionItems: CompletionItem[]
     filesCache: Map<string, string>
+    diagnostics : Map<string, Diagnostic[]> 
 }
 
 export function posInRange(pos: Position, range: Range) {

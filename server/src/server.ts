@@ -2006,7 +2006,7 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 	const fileVersion = doc.version
 	const filePath = URI.parse(doc.uri).fsPath
 	console.log('storeValidationResult', uri, 'version', fileVersion)
-	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map(), }
+	const fixedResults: FixedValidationResult = { ...res, uri: uri, completionItems: [], fileVersion: fileVersion, filesCache: new Map(), diagnostics }
 	if (res.errors.length > 0 && validatingResults.has(uri)) {
 		// keep previous completion items
 		const prev = validatingResults.get(uri)
@@ -2626,9 +2626,32 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 		}
 	}
 
+	const prev = validatingResults.get(uri)
+	if (prev != null) {
+		// collect prev errors and update errors for the same uri-s (to remove transitive errors)
+		for (const [errorsUri, _] of prev.diagnostics) {
+			if (uri == errorsUri || fixedResults.diagnostics.has(errorsUri))
+				continue;
+
+			diagnostics.set(errorsUri, collectDiagnostics(errorsUri, uri));
+		}
+	}
+
 	validatingResults.set(uri, fixedResults);
 
 	connection.languages.inlayHint.refresh()
+}
+
+function collectDiagnostics(uri: string, ignoreUri: string): Array<Diagnostic> {
+	let res = new Array<Diagnostic>();
+	for (const [errUri, it] of validatingResults) {
+		if (ignoreUri == errUri)
+			continue;
+		let errors = it.diagnostics.get(uri);
+		if (errors)
+			res.push(...errors);
+	}
+	return res;
 }
 
 connection.listen()
