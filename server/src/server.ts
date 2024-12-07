@@ -135,7 +135,21 @@ documents.onDidClose(e => {
 	// 	validatingProcesses.delete(e.document.uri)
 	// }
 	// validatingResults.delete(e.document.uri) // TODO: remove only tokens?
-	connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] })
+	let diagnostics = new Map<string, Diagnostic[]>()
+	diagnostics.set(e.document.uri, [])
+	const prev = validatingResults.get(e.document.uri)
+	if (prev != null) {
+		// collect prev errors and update errors for the same uri-s (to remove transitive errors)
+		for (const [errorsUri, _] of prev.diagnostics) {
+			if (e.document.uri == errorsUri)
+				continue;
+
+			diagnostics.set(errorsUri, collectDiagnostics(errorsUri, e.document.uri));
+		}
+	}
+	for (const [uri, errors] of diagnostics) {
+		connection.sendDiagnostics({ uri: uri, diagnostics: errors })
+	}
 })
 
 documents.listen(connection)
@@ -638,8 +652,8 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 						}
 					}
 					if (call.obj.length > 0) {
-						// const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, prevDelimiter, prevBrackets, call.obj, next)
-						if (call.obj.length > 0) {
+						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, call.obj, next)
+						// if (call.obj.length > 0) {
 							for (const it of next) {
 								if (it.label == call.obj) {
 									if (prevDelimiter == Delimiter.Is)
@@ -648,7 +662,7 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 										call.tdks.add(it.data)
 								}
 							}
-						}
+						// }
 					}
 				}
 			}
@@ -1871,6 +1885,9 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 		thisReject(error)
 	})
 	child.on('close', (exitCode: any) => {
+		if (registerValidatingResult) {
+			validatingProcesses.delete(textDocument.uri)
+		}
 		const validateTextResult = fs.readFileSync(resultFilePath, 'utf8')
 		// console.log('remove temp files', tempFilePath, resultFilePath)
 		try {
@@ -1893,10 +1910,13 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			return
 		}
 
-		if (textDocument.uri != globalCompletionFile.uri && documents.get(textDocument.uri)?.version !== textDocument.version) {
-			console.log('document version changed, ignoring result', textDocument.uri)
-			thisResolve()
-			return
+		if (textDocument.uri != globalCompletionFile.uri) {
+			let prev = documents.get(textDocument.uri);
+			if (prev && prev.version !== textDocument.version) {
+				console.log('document version changed, ignore prev result. Current', prev.version, "got", textDocument.version, textDocument.uri)
+				thisResolve()
+				return
+			}
 		}
 
 		// console.log(validateTextResult)
@@ -1944,15 +1964,13 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			if (!diagnostics.has(textDocument.uri))
 				diagnostics.set(textDocument.uri, [])
 			diagnostics.get(textDocument.uri).push({ range: Range.create(0, 0, 0, 0), message: `internal error: Validation process exited with code ${exitCode}.` })
+			console.log(`internal error: Validation process exited with code ${exitCode}. But no errors were reported. Please report this issue.`)
+			console.log('"""', output, '"""')
+			console.log('"""', args, '"""')
 		}
-		// if (exitCode !== 0 || result == null) {
-		// 	console.log('internal error: Validation process exited with code', exitCode, 'but no errors were reported. Please report this issue.')
-		// 	console.log('"""', output, '"""')
-		// }
 		for (const [uri, diags] of diagnostics.entries()) {
 			connection.sendDiagnostics({ uri: uri, diagnostics: diags })
 		}
-		validatingProcesses.delete(textDocument.uri)
 		thisResolve()
 	})
 	return vp.promise
