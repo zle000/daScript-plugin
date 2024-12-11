@@ -116,14 +116,14 @@ function debugWsFolders() {
 // 	validateTextDocument(event.document)
 // })
 
-documents.onDidChangeContent((event) => {
+documents.onDidChangeContent(async (event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document changed: ${event.document.uri}`)
-	updateTextDocumentData(event.document)
+	await updateTextDocumentData(event.document)
 })
 
-documents.onDidSave((event) => {
+documents.onDidSave(async (event) => {
 	console.log(`[Server(${process.pid}) ${debugWsFolders()}] Document saved: ${event.document.uri}`)
-	updateTextDocumentData(event.document)
+	await updateTextDocumentData(event.document)
 })
 
 documents.onDidClose(e => {
@@ -854,7 +854,8 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	if (!doc)
 		return getGlobalCompletionItems()
-	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
+	const fileData = validatingResults.get(textDocumentPosition.textDocument.uri)
+	// const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return getGlobalCompletionItems()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
@@ -1037,7 +1038,8 @@ connection.onCompletion(async (textDocumentPosition) => {
 })
 
 connection.onHover(async (textDocumentPosition) => {
-	const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
+	const fileData = validatingResults.get(textDocumentPosition.textDocument.uri)
+	// const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return null
 	const doc = documents.get(fileData.uri)
@@ -1150,7 +1152,8 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const doc = documents.get(typeDefinitionParams.textDocument.uri)
 	if (!doc)
 		return null
-	const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
+	// const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
+	const fileData = validatingResults.get(typeDefinitionParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const callChain = findCallChain(doc, fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
@@ -1193,7 +1196,8 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 })
 
 connection.onReferences(async (referencesParams) => {
-	const fileData = await getDocumentData(referencesParams.textDocument.uri)
+	// const fileData = await getDocumentData(referencesParams.textDocument.uri)
+	const fileData = validatingResults.get(referencesParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const doc = documents.get(fileData.uri)
@@ -1228,7 +1232,8 @@ connection.onDefinition(async (declarationParams) => {
 	const doc = documents.get(declarationParams.textDocument.uri)
 	if (!doc)
 		return null
-	const fileData = await getDocumentData(declarationParams.textDocument.uri)
+	// const fileData = await getDocumentData(declarationParams.textDocument.uri)
+	const fileData = validatingResults.get(declarationParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const callChain = findCallChain(doc, fileData, declarationParams.position, /*forAutocompletion*/false)
@@ -1258,7 +1263,8 @@ connection.onDefinition(async (declarationParams) => {
 })
 
 connection.onDocumentSymbol(async (documentSymbolParams) => {
-	const fileData = await getDocumentData(documentSymbolParams.textDocument.uri)
+	// const fileData = await getDocumentData(documentSymbolParams.textDocument.uri)
+	const fileData = validatingResults.get(documentSymbolParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const globalCompletion = getGlobalCompletion()
@@ -1549,9 +1555,9 @@ function forceUpdateAllDocuments() {
 	// documents.all().forEach(doc => getDocumentData(doc.uri))
 }
 
-function updateTextDocumentData(doc: TextDocument) {
+async function updateTextDocumentData(doc: TextDocument) {
 	connection.languages.inlayHint.refresh()
-	validateTextDocument(globalCompletionFile).then(() => {
+	return validateTextDocument(globalCompletionFile).then(() => {
 		validateTextDocument(doc, { force: true })
 	})
 }
@@ -1904,6 +1910,12 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 			return
 		}
 
+		if (vp.version !== textDocument.version) {
+			console.log('document version changed, ignore result. Current', vp.version, "got", textDocument.version, textDocument.uri)
+			thisResolve()
+			return
+		}
+
 		if (extra.autoFormat) {
 			autoFormatResult.set(textDocument.uri, validateTextResult)
 			thisResolve()
@@ -1957,6 +1969,7 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 				diagnostics.get(error._uri).push(diag)
 			}
 			console.time('storeValidationResult')
+			// console.log("validatingResults uri", textDocument.uri, "version", vp.version, "exitCode", exitCode, "actual version", textDocument.version)
 			storeValidationResult(settings, textDocument, result, diagnostics)
 
 			console.timeEnd('storeValidationResult')
