@@ -806,7 +806,7 @@ function typeDeclCompletion_(td: CompletionTypeDecl, cr: CompletionResult, cr2: 
             (dotDel) ? PROPERTY_PREFIXES : []
         for (const propertyPrefix of propertyPrefixes) {
             const fnCb = (fn: CompletionFunction): void => {
-                if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk === td.tdk) {
+                if (fn.args.length > 0 && fn.name.startsWith(propertyPrefix[1][0]) && fn.args[0].tdk.indexOf(td.tdk) >= 0) {
                     const propertyName = fixPropertyName(fn.name)
                     const c = CompletionItem.create(propertyName)
                     c.kind = CompletionItemKind.Property
@@ -866,12 +866,14 @@ export function typedefDocs(t: CompletionTypeDef) {
 export interface CompletionFuncArg extends CompletionAt {
     name: string
     alias: string
-    tdk: string
+    tdk: Array<string>
     value: string
+    variable: boolean
 }
 
 export function funcArgDetail(a: CompletionFuncArg) {
-    const val = (a.alias.length > 0) ? `${a.name} aka ${a.alias} : ${a.tdk}` : `${a.name} : ${a.tdk}`
+    const prefix = a.variable ? 'var ' : ''
+    const val = (a.alias.length > 0) ? `${prefix}${a.name} aka ${a.alias} : ${a.tdk.join(" | ")}` : `${prefix}${a.name} : ${a.tdk.join(" | ")}`
     if (a.value.length > 0)
         return `${val} = ${a.value}`
     return val
@@ -1030,7 +1032,7 @@ export interface FixedValidationResult extends ValidationResult {
     fileVersion: integer
     completionItems: CompletionItem[]
     filesCache: Map<string, string>
-    diagnostics : Map<string, Diagnostic[]> 
+    diagnostics: Map<string, Diagnostic[]>
 }
 
 export function posInRange(pos: Position, range: Range) {

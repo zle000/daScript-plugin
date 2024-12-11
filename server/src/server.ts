@@ -1062,10 +1062,14 @@ connection.onHover(async (textDocumentPosition) => {
 		if (settings.hovers.verbose) {
 
 			const func = findFunction(tok.name, tok.mod, fileData.completion, globalCompletion)
-			if (func != null && func.cpp.length > 0)
-				res += `\n[::${func.cpp}(...)]`
+			if (func != null) {
+				if (func.isGeneric)
+					res += `\n\n${funcDetail(func)}`
+				if (func.cpp.length > 0)
+					res += `\n[::${func.cpp}(...)]`
+			}
 
-			if (tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
+			if (tok.kind != TokenKind.ExprCall && tok.kind != TokenKind.Func && tok.kind != TokenKind.ExprDebug && tok.kind != TokenKind.ExprAddr && tok.tdk.length > 0) {
 				for (const td of fileData.completion.typeDecls) {
 					if (td.tdk === tok.tdk) {
 						if (!primitiveBaseType(td, fileData.completion, globalCompletion)) {
@@ -2205,49 +2209,51 @@ function storeValidationResult(settings: DasSettings, doc: TextDocument, res: Va
 			f.decl._range = AtToRange(f.decl)
 			f.decl._uri = AtToUri(f.decl, filePath, settings, workspaceFolders, res.dasRoot, fixedResults.filesCache)
 			if ((f.args.length == 1 || f.args.length == 2) && f.name.startsWith(PROPERTY_PREFIX)) {
-				let found = false
-				const td = findTypeDecl(f.args[0].tdk, res.completion, globalCompletion)
-				if (td) {
-					typeDeclIter(td, res.completion, globalCompletion, (td, st, en) => {
-						if (st) {
-							found = true
-							let name = f.name.substring(2)
-							let writeProp = false
-							if (name.endsWith('`clone')) {
-								name = name.substring(0, name.length - 6)
-								writeProp = true
+				// let found = false
+				for (const argTdk of f.args[0].tdk) {
+					const td = findTypeDecl(argTdk, res.completion, globalCompletion)
+					if (td) {
+						typeDeclIter(td, res.completion, globalCompletion, (td, st, en) => {
+							if (st) {
+								// found = true
+								let name = f.name.substring(2)
+								let writeProp = false
+								if (name.endsWith('`clone')) {
+									name = name.substring(0, name.length - 6)
+									writeProp = true
+								}
+								let prop = st.fields.find(f => f.name === name && f._property)
+								if (prop) {
+									if (writeProp)
+										prop._writeFn = f
+									else
+										prop._readFn = f
+								} else {
+									st.fields.push({
+										name: name,
+										tdk: f.tdk,
+										offset: -1,
+										isPrivate: false,
+										_range: f._range,
+										_uri: f._uri,
+										gen: f.gen,
+										file: f.file,
+										line: f.line,
+										lineEnd: f.lineEnd,
+										column: f.column,
+										columnEnd: f.columnEnd,
+										_originalText: f._originalText,
+										_property: true,
+										_readFn: !writeProp ? f : null,
+										_writeFn: writeProp ? f : null,
+									})
+								}
 							}
-							let prop = st.fields.find(f => f.name === name && f._property)
-							if (prop) {
-								if (writeProp)
-									prop._writeFn = f
-								else
-									prop._readFn = f
-							} else {
-								st.fields.push({
-									name: name,
-									tdk: f.tdk,
-									offset: -1,
-									isPrivate: false,
-									_range: f._range,
-									_uri: f._uri,
-									gen: f.gen,
-									file: f.file,
-									line: f.line,
-									lineEnd: f.lineEnd,
-									column: f.column,
-									columnEnd: f.columnEnd,
-									_originalText: f._originalText,
-									_property: true,
-									_readFn: !writeProp ? f : null,
-									_writeFn: writeProp ? f : null,
-								})
-							}
-						}
-					})
+						})
+					}
+					// if (found)
+					// 	continue
 				}
-				if (found)
-					continue
 			}
 			addMod(f.mod, f)
 			if (f._uri == uri)

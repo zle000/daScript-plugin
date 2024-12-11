@@ -219,11 +219,11 @@ def private cleanupTDK(str : string) : string
     var parts <- str |> split("const?")
 
     for res in parts
-        res = replace_multiple(res, [{auto "#" => ""; "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
+        res = replace_multiple(res, [{auto "&" => ""; " ==const" => ""; " const" => ""; " implicit" => "" }])
 
     return parts |> join("const?")
 
-def TypeDeclKey(t : smart_ptr<ast::TypeDecl>&)
+def TypeDeclKey(t : smart_ptr<ast::TypeDecl>&) : string
     return t |> describe_typedecl(false, false, true) |> cleanupTDK()
 
 struct CompletionTypeDeclField
@@ -330,7 +330,8 @@ def parse_typedef(var res : CompletionContext; mod : Module?; n : string#; t : s
 struct CompletionFuncArg : CompletionAt
     name : string
     alias : string
-    tdk : string
+    variable : bool
+    tdk : array<string>
     value : string
 
 struct CompletionFunction : CompletionAt
@@ -346,7 +347,7 @@ struct CompletionFunction : CompletionAt
     isGeneric : bool
 
 [nodiscard]
-def fix_fn_name(name : string): string
+def fix_fn_name(name : string) : string
     if name |> starts_with("__::")
         return name |> slice(4)
     return name
@@ -369,9 +370,15 @@ def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : 
     fn.isClassMethod = f.flags.isClassMethod
     for arg in f.arguments
         var fa <- [[CompletionFuncArg() name="{arg.name}"]]
+        fa.variable = arg._type.flags.removeConstant
         fa |> fill_at(arg.at)
-        fa.tdk = TypeDeclKey(arg._type)
-        res |> parse_typedecl(fa.tdk, arg._type)
+        if arg._type.baseType == Type option
+            for argType in arg._type.argTypes
+                fa.tdk.push(TypeDeclKey(argType))
+                res |> parse_typedecl(fa.tdk.back(), argType)
+        else
+            fa.tdk.push(TypeDeclKey(arg._type))
+            res |> parse_typedecl(fa.tdk[0], arg._type)
         fa.alias = arg._aka |> string()
         if arg.init != null
             fa.value = arg.init |> describe()
@@ -381,7 +388,7 @@ def parse_function(var res : CompletionContext; f : smart_ptr<Function>&; cpp : 
 
 def parse_annotation(var res : CompletionContext; ann : Annotation&)
     if ann.isBasicStructureAnnotation
-        let sann & = unsafe(reinterpret<BasicStructureAnnotation&> (ann))
+        let sann & = unsafe(reinterpret<BasicStructureAnnotation&>(ann))
         var st <- [[CompletionStruct() name="{sann.name}"]]
         if ann._module != null
             st.mod = ann._module.name |> string()
@@ -394,7 +401,7 @@ def parse_annotation(var res : CompletionContext; ann : Annotation&)
         res.result.structs |> emplace(st)
 
     elif ann.isTypeAnnotation
-        let tann & = unsafe(reinterpret<TypeAnnotation&> (ann))
+        let tann & = unsafe(reinterpret<TypeAnnotation&>(ann))
         var td <- [[CompletionStruct() name="{tann.name}"]]
         if ann._module != null
             td.mod = "{ann._module.name}"
