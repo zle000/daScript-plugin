@@ -240,7 +240,7 @@ connection.onCodeAction(async (params) => {
 					cmd.changes[params.textDocument.uri] = [TextEdit.del(range)]
 					res.push(CodeAction.create(`Remove unused requirement: '${action.data}'`, cmd, CodeActionKind.QuickFix))
 
-					const fileData = await getDocumentData(params.textDocument.uri)
+					const fileData = await getDocumentDataFast(params.textDocument.uri)
 					if (fileData) {
 						const cmdAll = { changes: {}, }
 						for (const req of fileData.requirements) {
@@ -654,14 +654,14 @@ function resolveChainTdks(doc: TextDocument, fileData: FixedValidationResult, ca
 					if (call.obj.length > 0) {
 						const nextTdk = typeDeclCompletion(typeDeclData, fileData.completion, globalCompletion, call.delimiter, call.brackets, call.obj, next)
 						// if (call.obj.length > 0) {
-							for (const it of next) {
-								if (it.label == call.obj) {
-									if (prevDelimiter == Delimiter.Is)
-										call.tdks.add(BaseType.tBool)
-									else if (it.data?.length > 0)
-										call.tdks.add(it.data)
-								}
+						for (const it of next) {
+							if (it.label == call.obj) {
+								if (prevDelimiter == Delimiter.Is)
+									call.tdks.add(BaseType.tBool)
+								else if (it.data?.length > 0)
+									call.tdks.add(it.data)
 							}
+						}
 						// }
 					}
 				}
@@ -854,8 +854,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 	const doc = documents.get(textDocumentPosition.textDocument.uri)
 	if (!doc)
 		return getGlobalCompletionItems()
-	const fileData = validatingResults.get(textDocumentPosition.textDocument.uri)
-	// const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
+	const fileData = await getDocumentDataFast(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return getGlobalCompletionItems()
 	const callChain = findCallChain(doc, fileData, textDocumentPosition.position, /*forAutocompletion*/true)
@@ -1038,8 +1037,7 @@ connection.onCompletion(async (textDocumentPosition) => {
 })
 
 connection.onHover(async (textDocumentPosition) => {
-	const fileData = validatingResults.get(textDocumentPosition.textDocument.uri)
-	// const fileData = await getDocumentData(textDocumentPosition.textDocument.uri)
+	const fileData = await getDocumentDataFast(textDocumentPosition.textDocument.uri)
 	if (!fileData)
 		return null
 	const doc = documents.get(fileData.uri)
@@ -1152,8 +1150,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 	const doc = documents.get(typeDefinitionParams.textDocument.uri)
 	if (!doc)
 		return null
-	// const fileData = await getDocumentData(typeDefinitionParams.textDocument.uri)
-	const fileData = validatingResults.get(typeDefinitionParams.textDocument.uri)
+	const fileData = await getDocumentDataFast(typeDefinitionParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const callChain = findCallChain(doc, fileData, typeDefinitionParams.position, /*forAutocompletion*/false)
@@ -1196,8 +1193,7 @@ connection.onTypeDefinition(async (typeDefinitionParams) => {
 })
 
 connection.onReferences(async (referencesParams) => {
-	// const fileData = await getDocumentData(referencesParams.textDocument.uri)
-	const fileData = validatingResults.get(referencesParams.textDocument.uri)
+	const fileData = await getDocumentDataFast(referencesParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const doc = documents.get(fileData.uri)
@@ -1232,8 +1228,7 @@ connection.onDefinition(async (declarationParams) => {
 	const doc = documents.get(declarationParams.textDocument.uri)
 	if (!doc)
 		return null
-	// const fileData = await getDocumentData(declarationParams.textDocument.uri)
-	const fileData = validatingResults.get(declarationParams.textDocument.uri)
+	const fileData = await getDocumentDataFast(declarationParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const callChain = findCallChain(doc, fileData, declarationParams.position, /*forAutocompletion*/false)
@@ -1263,8 +1258,7 @@ connection.onDefinition(async (declarationParams) => {
 })
 
 connection.onDocumentSymbol(async (documentSymbolParams) => {
-	// const fileData = await getDocumentData(documentSymbolParams.textDocument.uri)
-	const fileData = validatingResults.get(documentSymbolParams.textDocument.uri)
+	const fileData = await getDocumentDataFast(documentSymbolParams.textDocument.uri)
 	if (!fileData)
 		return null
 	const globalCompletion = getGlobalCompletion()
@@ -1390,7 +1384,7 @@ connection.languages.inlayHint.on(async (inlayHintParams) => {
 	const doc = documents.get(inlayHintParams.textDocument.uri)
 	if (!doc)
 		return null
-	const fileData = validatingResults.get(inlayHintParams.textDocument.uri)
+	const fileData = await getDocumentDataFast(inlayHintParams.textDocument.uri)
 	if (!fileData || fileData.errors.length > 0 || doc.version != fileData.fileVersion)
 		return null
 	const res: InlayHint[] = []
@@ -1562,17 +1556,30 @@ async function updateTextDocumentData(doc: TextDocument) {
 	})
 }
 
-async function getDocumentData(uri: string): Promise<FixedValidationResult> {
-	return validateTextDocument(globalCompletionFile).then(() => {
-		let doc = documents.get(uri)
-		if (doc) {
-			return validateTextDocument(doc).then(() => {
-				return validatingResults.get(uri)
-			})
-		}
-		return null
-	})
+async function getDocumentDataFast(uri: string): Promise<FixedValidationResult> {
+	const data = validatingResults.get(uri)
+	if (data)
+		return data
+	const req = validatingProcesses.get(uri)
+	if (req) {
+		return req.promise.then(() => {
+			return getDocumentDataFast(uri)
+		})
+	}
+	return null
+
 }
+// async function getDocumentData(uri: string): Promise<FixedValidationResult> {
+// 	return validateTextDocument(globalCompletionFile).then(() => {
+// 		let doc = documents.get(uri)
+// 		if (doc) {
+// 			return validateTextDocument(doc).then(() => {
+// 				return validatingResults.get(uri)
+// 			})
+// 		}
+// 		return null
+// 	})
+// }
 
 async function validateWorkspaceCommand(args: any = {}): Promise<void> {
 
@@ -1912,6 +1919,13 @@ async function validateTextDocument(textDocument: TextDocument, extra: { autoFor
 
 		if (vp.version !== textDocument.version) {
 			console.log('document version changed, ignore result. Current', vp.version, "got", textDocument.version, textDocument.uri)
+			thisResolve()
+			return
+		}
+
+		let doc = documents.get(textDocument.uri)
+		if (doc == null) {
+			console.log('document was closed, ignore result', textDocument.uri)
 			thisResolve()
 			return
 		}
