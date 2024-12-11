@@ -226,8 +226,19 @@ export function findTypeDecl(tdk: string, cr: CompletionResult, cr2: CompletionR
 export function findFunction(name: string, mod: string, cr: CompletionResult, cr2: CompletionResult): CompletionFunction {
     let cond = f => f.name === name && f.mod === mod
     let res = cr.functions.find(cond)
-    if (!res && cr2)
+    if (res)
+        return res
+    if (cr2) {
         res = cr2.functions.find(cond)
+        if (res)
+            return res
+    }
+    const parts = name.split('`')
+    if (parts.length > 1) {
+        mod = parts[0]
+        parts.shift()
+        return findFunction(parts.join('`'), mod, cr, cr2)
+    }
     return res
 }
 
